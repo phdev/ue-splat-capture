@@ -37,7 +37,7 @@ def main(out_dir: str, want_depth: bool = True):
     export.write_ue_poses(
         ue_poses_path, intr["w"], intr["h"], intr["hfov_deg"], frames,
         scene_meta={
-            "background": S.BACKGROUND,
+            "background": [0.0, 0.0, 0.0],  # BASE_COLOR void is black
             "aabb_min_cm": S.AABB_MIN_CM, "aabb_max_cm": S.AABB_MAX_CM,
             "fiducials": S.FIDUCIALS,
             "primitives": S.primitives_for_scene_json(),
