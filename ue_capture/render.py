@@ -33,9 +33,13 @@ def _make_capture(unreal, w, h, hfov_deg, capture_source, rtf=None):
             s.set_editor_property("enabled", False)
             return s
         comp.set_editor_property("show_flag_settings",
-                                 [_flag(n) for n in ("Atmosphere", "Fog",
-                                                     "VolumetricFog", "Cloud",
-                                                     "VolumetricCloud")])
+                                 [_flag(n) for n in (
+                                     "Atmosphere", "Fog", "VolumetricFog", "Cloud",
+                                     "VolumetricCloud", "GlobalIllumination",
+                                     "AmbientOcclusion", "ScreenSpaceAO",
+                                     "ScreenSpaceReflections", "LumenGlobalIllumination",
+                                     "LumenReflections", "ReflectionEnvironment",
+                                     "DistanceFieldAO")])
     except Exception:
         pass
     # Pin exposure (no eye adaptation) so a surface has the SAME brightness in
@@ -79,10 +83,17 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
 
-    # FXAA (no temporal noise), no auto-exposure/bloom/motion-blur.
+    # FXAA (no temporal noise), no auto-exposure/bloom/motion-blur, and crucially
+    # NO view-dependent global illumination / screen-space effects: UE5's Lumen GI
+    # + SSAO/SSR make the same surface look different from different views (and add
+    # noise), which a view-independent (SH0) splat cannot fit. Direct lighting only
+    # (our 6 directional lights) is view-consistent.
     try:
         for c in ("r.AntiAliasingMethod 2", "r.DefaultFeature.AutoExposure 0",
-                  "r.DefaultFeature.Bloom 0", "r.DefaultFeature.MotionBlur 0"):
+                  "r.DefaultFeature.Bloom 0", "r.DefaultFeature.MotionBlur 0",
+                  "r.DynamicGlobalIlluminationMethod 0", "r.ReflectionMethod 0",
+                  "r.AmbientOcclusionLevels 0", "r.SSGI.Enable 0", "r.SSR.Quality 0",
+                  "r.Lumen.DiffuseIndirect.Allow 0"):
             unreal.SystemLibrary.execute_console_command(world, c)
     except Exception:
         pass
