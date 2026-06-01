@@ -70,13 +70,17 @@ def _poly_at(closed_pts, cum, s):
     return [closed_pts[j][k] * (1 - f) + closed_pts[j + 1][k] * f for k in range(3)]
 
 
-def default_rig(center_cm=(0.0, 0.0, 35.0), radius_cm=360.0):
-    """Canonical self-test rig: 3 orbit rings + a short interior walk."""
-    orbit = orbit_hemisphere(center_cm, radius_cm, elevations_deg=(18.0, 34.0, 50.0))
-    walk = interior_walk(
-        waypoints_cm=[[200, 0, 0], [0, 200, 0], [-200, 0, 0], [0, -200, 0]],
-        n_steps=8, height_cm=130.0, start_index=len(orbit))
-    return orbit + walk
+def default_rig(center_cm=(0.0, 0.0, 35.0), radius_cm=360.0, include_walk=False):
+    """Canonical self-test rig: 3 orbit rings (held-out interleaved). The
+    interior walk is available (`interior_walk`, unit-tested) but OFF by default
+    for the recon self-test -- those few interior-only train views pull splat
+    capacity away from the orbit and widen the held-out gap."""
+    poses = orbit_hemisphere(center_cm, radius_cm, elevations_deg=(18.0, 34.0, 50.0))
+    if include_walk:
+        poses += interior_walk(
+            waypoints_cm=[[200, 0, 0], [0, 200, 0], [-200, 0, 0], [0, -200, 0]],
+            n_steps=8, height_cm=130.0, start_index=len(poses))
+    return poses
 
 
 if __name__ == "__main__":

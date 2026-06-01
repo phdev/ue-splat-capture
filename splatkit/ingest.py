@@ -90,7 +90,10 @@ def ingest(ue_poses_path: str, out_dir: str, copy_images: bool = True) -> dict:
         name = Path(fr["file_path"]).name
         rel = f"images/{sub}/{name}"
         if copy_images and Path(fr["file_path"]).exists():
-            shutil.copyfile(fr["file_path"], out / rel)
+            src_img = Image.open(fr["file_path"]).convert("RGB")
+            if src_img.size != (W, H):     # box-downsample supersampled renders
+                src_img = src_img.resize((W, H), Image.BOX)
+            src_img.save(out / rel)
         frames.append({
             "file_path": rel, "split": fr.get("split", "train"),
             "location_cm": loc, "basis_ue": basis,

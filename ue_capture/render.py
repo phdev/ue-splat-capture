@@ -98,10 +98,16 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
     except Exception:
         pass
 
+    # Supersample: render at ss*res; splatkit.ingest box-downsamples to (w,h).
+    # Single-sample FXAA leaves per-view aliasing (jaggies shift between views ->
+    # view-inconsistent -> caps the splat); SSAA matches the synthetic ss=2 path.
+    ss = int(os.environ.get("UE_CAPTURE_SS", "2"))
+    rw, rh = w * ss, h * ss
+
     # Lit FinalColorLDR: real shading (depth cues) with matte materials (so it
     # stays view-independent) + pinned exposure for cross-view consistency.
     col_actor, col_comp, col_rt = _make_capture(
-        unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
+        unreal, rw, rh, hfov_deg, unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
     dep_actor = dep_comp = dep_rt = None
     if want_depth:
         dep_actor, dep_comp, dep_rt = _make_capture(

@@ -133,9 +133,8 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    # textured platform material: the engine BasicShapeMaterial has a built-in
-    # grid/checker texture -> dense photometric features over the big flat
-    # platform so the splat can lock its geometry (a flat gray plane underfits).
+    # textured platform (engine grid material) gives the big flat plane dense
+    # photometric features; supersampling (render.py) keeps it alias-free.
     plat_mat = unreal.load_asset(_BASE_MAT)
     spawned = []
 
