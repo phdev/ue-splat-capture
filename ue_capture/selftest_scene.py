@@ -88,9 +88,25 @@ def _spawn_mesh(unreal, actors_sys, mesh_path, location_cm, scale, rgb, emissive
 
 
 def spawn_scene(unreal):
-    """Spawn platform, objects, and emissive fiducials. Returns spawned actors."""
+    """Spawn lights, platform, objects, and emissive fiducials. Returns actors."""
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     spawned = []
+
+    # Two directional lights (key + fill) so every face is lit without needing a
+    # sky dome -- mirrors the numpy raytracer's view-independent shading.
+    actors_sys.spawn_actor_from_class(unreal.DirectionalLight,
+                                      unreal.Vector(0, 0, 500), unreal.Rotator(-50, -30, 0))
+    fill = actors_sys.spawn_actor_from_class(unreal.DirectionalLight,
+                                             unreal.Vector(0, 0, 500), unreal.Rotator(-20, 150, 0))
+    try:
+        fill.directional_light_component.set_intensity(2.0)
+    except Exception:
+        pass
+    try:
+        actors_sys.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 500),
+                                          unreal.Rotator(0, 0, 0))
+    except Exception:
+        pass
 
     # platform: scale the 100cm cube to the platform extents
     pmin, pmax = PLATFORM["min"], PLATFORM["max"]

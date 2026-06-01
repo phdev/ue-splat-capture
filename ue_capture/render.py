@@ -16,16 +16,30 @@ import os
 from . import export
 
 
-def _make_capture(unreal, w, h, hfov_deg, capture_source):
+def _make_capture(unreal, w, h, hfov_deg, capture_source, rtf=None):
     sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actor = sub.spawn_actor_from_class(unreal.SceneCapture2D,
                                        unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
     comp = actor.capture_component2d
     comp.fov_angle = hfov_deg
     comp.capture_source = capture_source
-    rt = unreal.RenderingLibrary.create_render_target2d(actor, w, h)
+    # 8-bit RT so export writes PNG (the float default writes EXR).
+    rtf = rtf or unreal.TextureRenderTargetFormat.RTF_RGBA8
+    rt = unreal.RenderingLibrary.create_render_target2d(actor, w, h, rtf)
     comp.texture_target = rt
     return actor, comp, rt
+
+
+def _export_png(unreal, world, rt, out_images_dir, name):
+    """export_render_target writes the file verbatim (no extension). Normalize
+    it to <name>.png so the rest of the pipeline sees a real .png path."""
+    import os
+    unreal.RenderingLibrary.export_render_target(world, rt, out_images_dir, name)
+    raw = os.path.join(out_images_dir, name)
+    png = raw + ".png"
+    if os.path.exists(raw) and not os.path.exists(png):
+        os.replace(raw, png)
+    return png
 
 
 def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
@@ -41,7 +55,8 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
     dep_actor = dep_comp = dep_rt = None
     if want_depth:
         dep_actor, dep_comp, dep_rt = _make_capture(
-            unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_SCENE_DEPTH)
+            unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_SCENE_DEPTH,
+            rtf=unreal.TextureRenderTargetFormat.RTF_RGBA16F)
 
     frames = []
     for p in poses:
@@ -53,16 +68,16 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
                 comp_actor.set_actor_location_and_rotation(loc, rot, False, False)
         col_comp.capture_scene()
         name = f"cam_{p['index']:03d}"
-        unreal.RenderingLibrary.export_render_target(world, col_rt, out_dir + "/images", name)
+        png = _export_png(unreal, world, col_rt, out_dir + "/images", name)
         depth_path = None
         if want_depth:
             dep_comp.capture_scene()
             unreal.RenderingLibrary.export_render_target(world, dep_rt, out_dir + "/images",
                                                          name + "_depth")
-            depth_path = os.path.join(out_dir, "images", name + "_depth.exr")
+            depth_path = os.path.join(out_dir, "images", name + "_depth")
         # authoritative pose, read off the actor UE actually rendered with
         frames.append({
-            "file_path": os.path.join(out_dir, "images", name + ".png"),
+            "file_path": png,
             "split": p["split"],
             "location_cm": export.location_from_actor(unreal, col_actor),
             "basis_ue": export.basis_from_actor(unreal, col_actor),

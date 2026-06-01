@@ -47,10 +47,16 @@ def main(out_dir: str, want_depth: bool = True):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="out/ue_capture")
-    ap.add_argument("--no-depth", action="store_true")
-    # UnrealEditor-Cmd passes script args after a literal `--`
-    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    args = ap.parse_args(argv)
-    main(args.out, want_depth=not args.no_depth)
+    # When launched via `UnrealEditor-Cmd -ExecutePythonScript=...` there is no
+    # `--` argv separator, so prefer environment variables (absolute paths are
+    # safest since CWD is the engine's, not the repo's).
+    _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out = os.environ.get("UE_CAPTURE_OUT") or os.path.join(_repo, "out", "ue_capture")
+    want_depth = os.environ.get("UE_CAPTURE_DEPTH", "0") == "1"
+    if "--" in sys.argv:  # also support explicit CLI use
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--out", default=out)
+        ap.add_argument("--no-depth", action="store_true")
+        a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
+        out, want_depth = a.out, (want_depth and not a.no_depth)
+    main(out, want_depth=want_depth)

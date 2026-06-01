@@ -55,6 +55,25 @@ Always invoke via `uv run` (Makefile does). Set `PYTORCH_ENABLE_MPS_FALLBACK=1`
 - Training is slow-ish on MPS (full-image O(N·P) rasteriser, no tiling). 96×96
   fixtures keep it tractable. Don't run two MPS jobs at once (they contend).
 
+## UE 5.7 capture — validated live on this machine
+A real headless capture was run: `UnrealEditor-Cmd <proj> -ExecutePythonScript=…
+-unattended -nosplash -nop4 -RenderOffScreen -stdout`. Findings baked into the code:
+- **Class names in 5.7 Python**: `unreal.RenderingLibrary` (create_render_target2d,
+  export_render_target) and `unreal.MathLibrary` (find_look_at_rotation) — NOT the
+  `Kismet*` names. `unreal.load_asset("/Engine/BasicShapes/Cube.Cube")` works.
+- **PNG output**: create the RT as `TextureRenderTargetFormat.RTF_RGBA8` (the float
+  default writes EXR), and `export_render_target` writes the file with NO extension
+  → `render._export_png` renames it to `<name>.png`.
+- **Lighting required**: an empty level renders black; `selftest_scene.spawn_scene`
+  spawns two directional lights.
+- `MaterialInstanceDynamic.create` is absent in 5.7 Python, so object colours are
+  best-effort (they render neutral/gray) — cosmetic; doesn't affect poses/gates.
+- Offscreen Metal rendering works headless on Apple Silicon. Live result: 80 frames
+  rendered; ingest → **T1 reprojection 3e-14 px, T2 all PASS** on authentic UE poses.
+- Output goes to `out/` (gitignored); committed fixtures stay the numpy stand-in.
+  Drive it with `UE_PROJECT=… make capture` (or `UE_CAPTURE_OUT=… UnrealEditor-Cmd …
+  -ExecutePythonScript=ue_capture/run_capture.py`).
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
