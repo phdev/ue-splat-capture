@@ -204,7 +204,7 @@ def build_transforms(intr: dict, frames: Iterable[dict],
         if "split" in fr:
             entry["split"] = fr["split"]
         # carry through optional verification aids
-        for k in ("fiducials_px", "location_cm", "basis_ue"):
+        for k in ("fiducials_px", "fiducials_vis", "location_cm", "basis_ue"):
             if k in fr and k not in entry:
                 v = fr[k]
                 entry[k] = v.tolist() if isinstance(v, np.ndarray) else v
