@@ -1,0 +1,163 @@
+{
+  "t0": {
+    "checks": [
+      {
+        "metric": "pytest_exit_code",
+        "note": "T0 coordinate-math tests (round-trip, handedness, reproj)",
+        "op": "==",
+        "pass": true,
+        "threshold": 0.0,
+        "value": 0.0
+      }
+    ],
+    "metric": "pytest_exit_code",
+    "pass": true,
+    "threshold": 0.0,
+    "tier": "t0",
+    "value": 0.0
+  },
+  "t1": {
+    "checks": [
+      {
+        "metric": "max_pose_mean_reproj_px",
+        "note": "72 poses, 497 fiducial obs",
+        "op": "<",
+        "pass": true,
+        "threshold": 1.0,
+        "value": 1.5647509905736093e-14
+      },
+      {
+        "metric": "global_mean_reproj_px",
+        "op": "<",
+        "pass": true,
+        "threshold": 1.0,
+        "value": 8.759118079213556e-15
+      }
+    ],
+    "metric": "max_pose_mean_reproj_px",
+    "n_observations": 497,
+    "n_poses": 72,
+    "pass": true,
+    "threshold": 1.0,
+    "tier": "t1",
+    "value": 1.5647509905736093e-14
+  },
+  "t2": {
+    "checks": [
+      {
+        "metric": "aabb_frustum_coverage_frac",
+        "note": "216 samples, min 24 views/pt",
+        "op": ">=",
+        "pass": true,
+        "threshold": 0.99,
+        "value": 1.0
+      },
+      {
+        "metric": "min_views_per_aabb_point",
+        "op": ">=",
+        "pass": true,
+        "threshold": 1.0,
+        "value": 24.0
+      },
+      {
+        "metric": "cameras_inside_geometry",
+        "op": "==",
+        "pass": true,
+        "threshold": 0.0,
+        "value": 0.0
+      },
+      {
+        "metric": "n_frames",
+        "op": ">=",
+        "pass": true,
+        "threshold": 1.0,
+        "value": 72.0
+      },
+      {
+        "metric": "intrinsics_sane",
+        "op": ">=",
+        "pass": true,
+        "threshold": 1.0,
+        "value": 1.0
+      },
+      {
+        "metric": "images_exist_at_declared_res",
+        "note": "72/72",
+        "op": "==",
+        "pass": true,
+        "threshold": 72.0,
+        "value": 72.0
+      },
+      {
+        "metric": "poses_proper_rotation",
+        "op": "==",
+        "pass": true,
+        "threshold": 72.0,
+        "value": 72.0
+      },
+      {
+        "metric": "splits_present",
+        "note": "heldout,train",
+        "op": ">=",
+        "pass": true,
+        "threshold": 2.0,
+        "value": 2.0
+      }
+    ],
+    "metric": "aabb_frustum_coverage_frac",
+    "pass": true,
+    "schema_issues": [],
+    "threshold": 0.99,
+    "tier": "t2",
+    "value": 1.0
+  },
+  "t3": {
+    "checks": [
+      {
+        "metric": "heldout_psnr_db",
+        "note": "18 held-out views, min 31.25 dB",
+        "op": ">=",
+        "pass": true,
+        "threshold": 28.0,
+        "value": 33.04054503970676
+      },
+      {
+        "metric": "heldout_ssim",
+        "note": "min 0.975",
+        "op": ">=",
+        "pass": true,
+        "threshold": 0.85,
+        "value": 0.9853286676936679
+      },
+      {
+        "metric": "overfit_gap_db",
+        "note": "train 33.75 - heldout 33.04 dB",
+        "op": "<=",
+        "pass": true,
+        "threshold": 8.0,
+        "value": 0.7054826595165125
+      }
+    ],
+    "device": "mps",
+    "heldout": {
+      "n": 18,
+      "psnr_mean": 33.04054503970676,
+      "psnr_min": 31.247684478759766,
+      "ssim_mean": 0.9853286676936679,
+      "ssim_min": 0.9751494526863098
+    },
+    "iters": 1500,
+    "metric": "heldout_psnr_db",
+    "n_gauss": 6000,
+    "pass": true,
+    "seed": 0,
+    "threshold": 28.0,
+    "tier": "t3",
+    "train": {
+      "psnr_mean": 33.74602769922327,
+      "ssim_mean": 0.9877276652389102
+    },
+    "train_seconds": 759.971519947052,
+    "value": 33.04054503970676
+  }
+}
