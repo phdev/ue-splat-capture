@@ -56,22 +56,47 @@ def primitives_for_scene_json():
 # --------------------------------------------------------------------------- #
 # Unreal spawning (only runs inside UnrealEditor-Cmd)
 # --------------------------------------------------------------------------- #
+BG_COLOR = [0.30, 0.33, 0.42]   # emissive backdrop dome colour
+
+
+def _fresh_material(unreal, name):
+    p = "/Game/" + name
+    if unreal.EditorAssetLibrary.does_asset_exist(p):
+        unreal.EditorAssetLibrary.delete_asset(p)
+    return unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        name, "/Game", unreal.Material, unreal.MaterialFactoryNew())
+
+
 def ensure_color_material(unreal):
-    """Author (or load) a tiny material whose 'Color' VectorParameter drives
-    BaseColor directly. Captured via the BASE_COLOR AOV this yields flat, TRUE,
-    view-independent colours (no lighting/exposure to tune) -- ideal for an SH0
-    splat. Validated live on UE 5.7: a red param renders [229,38,31]."""
-    path = "/Game/M_Splat"
-    mat = unreal.load_asset(path)
-    if mat:
-        return mat
-    tools = unreal.AssetToolsHelpers.get_asset_tools()
-    mat = tools.create_asset("M_Splat", "/Game", unreal.Material, unreal.MaterialFactoryNew())
+    """Author a MATTE material: 'Color' VectorParameter -> BaseColor, Roughness=1,
+    Specular=0. Matte = view-independent, so a lit FinalColorLDR capture stays
+    SH0-friendly (no moving specular highlights). Validated live on UE 5.7."""
     mel = unreal.MaterialEditingLibrary
+    mat = _fresh_material(unreal, "M_SplatMatte")
     vp = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -350, 0)
     vp.set_editor_property("parameter_name", "Color")
-    vp.set_editor_property("default_value", unreal.LinearColor(0.6, 0.6, 0.6, 1.0))
     mel.connect_material_property(vp, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    cr = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -350, 200)
+    cr.set_editor_property("r", 1.0)
+    mel.connect_material_property(cr, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    cs = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -350, 320)
+    cs.set_editor_property("r", 0.0)
+    mel.connect_material_property(cs, "", unreal.MaterialProperty.MP_SPECULAR)
+    mel.recompile_material(mat)
+    return mat
+
+
+def ensure_bg_material(unreal):
+    """Unlit, two-sided, constant-emissive material for the backdrop dome -> a
+    clean solid background from every orbit view (the RT clear colour does NOT
+    fill FinalColorLDR empties, and the empty void is noisy/black otherwise)."""
+    mel = unreal.MaterialEditingLibrary
+    mat = _fresh_material(unreal, "M_Bg")
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("two_sided", True)
+    c3 = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -350, 0)
+    c3.set_editor_property("constant", unreal.LinearColor(*BG_COLOR, 1.0))
+    mel.connect_material_property(c3, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(mat)
     return mat
 
@@ -93,14 +118,39 @@ def _spawn_mesh(unreal, actors_sys, mat, mesh_path, location_cm, scale, rgb):
 
 
 def spawn_scene(unreal):
-    """Spawn platform, objects, and fiducials with true-colour matte materials.
+    """Spawn lights, backdrop dome, platform, objects, and fiducials.
 
-    No lights are needed: capture uses the BASE_COLOR AOV (flat albedo,
-    view-independent), so the scene reconstructs cleanly with an SH0 splat.
+    Lit FinalColorLDR capture: a strong top key + all-axis fill directionals give
+    every face illumination (cameras orbit, so fixed lights alone would leave
+    camera-facing sides black) plus a top-biased shading gradient for depth cues;
+    matte materials keep it view-independent. An unlit emissive dome provides a
+    solid background. Exposure is pinned on the SceneCapture (render.py).
     """
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
+    bg_mat = ensure_bg_material(unreal)
     spawned = []
+
+    # lights: strong top key + 4 side fills + weak bottom fill
+    for (pitch, yaw, inten) in [(-90, 0, 3.5), (-15, 0, 1.6), (-15, 180, 1.6),
+                                (-15, 90, 1.6), (-15, -90, 1.6), (60, 0, 0.8)]:
+        lt = actors_sys.spawn_actor_from_class(
+            unreal.DirectionalLight, unreal.Vector(0, 0, 500), unreal.Rotator(pitch, yaw, 0))
+        try:
+            lt.directional_light_component.set_intensity(inten)
+        except Exception:
+            pass
+
+    # backdrop dome (big two-sided unlit emissive sphere, no shadow)
+    dome = actors_sys.spawn_actor_from_object(
+        unreal.load_asset(_SPHERE_MESH), unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
+    dome.static_mesh_component.set_world_scale3d(unreal.Vector(40, 40, 40))
+    try:
+        dome.static_mesh_component.set_material(
+            0, unreal.MaterialLibrary.create_dynamic_material_instance(dome, bg_mat))
+        dome.static_mesh_component.set_cast_shadow(False)
+    except Exception as e:  # pragma: no cover
+        unreal.log_warning(f"dome material: {e}")
 
     # platform: scale the 100cm cube to the platform extents
     pmin, pmax = PLATFORM["min"], PLATFORM["max"]

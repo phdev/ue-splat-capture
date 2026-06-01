@@ -27,8 +27,25 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from . import convert
+
+
+def _detect_background(out_dir: Path, frames, n_sample=24, k=3):
+    """Median corner colour across frames -> the true backdrop colour, so the
+    trainer composites/inits against what UE actually rendered."""
+    cols = []
+    for fr in frames[:n_sample]:
+        p = out_dir / fr["file_path"]
+        if not p.exists():
+            continue
+        a = np.asarray(Image.open(p).convert("RGB"), np.float32) / 255.0
+        h, w = a.shape[:2]
+        cols += [a[:k, :k], a[:k, -k:], a[-k:, :k], a[-k:, -k:]]
+    if not cols:
+        return None
+    return np.concatenate([c.reshape(-1, 3) for c in cols]).mean(0).tolist()
 
 
 def _project_ue_native(loc_cm, basis_ue, intr, points_cm):
@@ -80,13 +97,14 @@ def ingest(ue_poses_path: str, out_dir: str, copy_images: bool = True) -> dict:
             "fiducials_px": uv, "fiducials_vis": vis,
         })
 
+    bg = _detect_background(out, frames) or up.get("background", [0, 0, 0])
     doc = convert.build_transforms(
         intr, frames,
         aabb_min_ue=up.get("aabb_min_cm"), aabb_max_ue=up.get("aabb_max_cm"),
         extra={"n_fiducials": len(fids),
                "fiducials_world_m": convert.ue_point_to_world(fid_centers).tolist()
                if fid_centers.shape[0] else [],
-               "background": up.get("background", [0, 0, 0]),
+               "background": bg,
                "source": "ue_capture (UnrealEditor-Cmd) -> splatkit.ingest"})
     (out / "transforms.json").write_text(json.dumps(doc, indent=1))
 

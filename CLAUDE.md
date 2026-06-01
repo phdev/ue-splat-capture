@@ -64,17 +64,26 @@ A real headless capture was run: `UnrealEditor-Cmd <proj> -ExecutePythonScript=�
 - **PNG output**: create the RT as `TextureRenderTargetFormat.RTF_RGBA8` (the float
   default writes EXR), and `export_render_target` writes the file with NO extension
   → `render._export_png` renames it to `<name>.png`.
-- **Capture mode = BASE_COLOR AOV** (`SceneCaptureSource.SCS_BASE_COLOR`): flat
-  true-colour albedo, view-independent, no lighting/exposure to tune — the clean
-  input for an SH0 splat. So no lights are spawned. (FINAL_COLOR_LDR needs lights
-  + exposure pinning and the default material is glossy/view-dependent → bad for SH0.)
-- **Colours**: author `M_Splat` (a VectorParameter "Color" wired to BaseColor via
-  MaterialEditingLibrary) and per-object MIDs from it. `MaterialInstanceDynamic.create`
-  is ABSENT in 5.7; use `MaterialLibrary.create_dynamic_material_instance`. The stock
-  BasicShapeMaterial "Color" param does NOT drive the BaseColor G-buffer (renders gray).
-- **Clean background**: SceneCapture2D has NO `show_flags` attribute — disable the sky
-  via `comp.show_flag_settings = [EngineShowFlagsSetting(Atmosphere/Fog/Cloud=False)]`,
-  else the void renders a noisy bright horizon.
+- **Capture mode = lit `SCS_FINAL_COLOR_LDR`** with the recipe below. (BASE_COLOR
+  gives flat albedo with NO shading → no depth cues → the splat smears depth, ~13 dB.
+  Lighting provides the depth cues; matte materials keep it SH0-friendly.)
+- **Materials**: author `M_SplatMatte` (VectorParameter "Color"→BaseColor, Constant
+  1→Roughness, Constant 0→Specular) so surfaces are matte/view-independent (default
+  material roughness is 0 = mirror-glossy → moving highlights → bad). MIDs via
+  `MaterialLibrary.create_dynamic_material_instance` (`MaterialInstanceDynamic.create`
+  is ABSENT in 5.7). Assets created headless aren't saved unless `EditorAssetLibrary.
+  save_asset`, so author fresh each run.
+- **Lighting**: cameras orbit, so fixed lights leave camera-facing sides black and
+  SkyLight captured-scene ambient doesn't fill in a one-shot. Use 6 explicit
+  DirectionalLights (strong top key + 4 side fills + weak bottom) → every face lit +
+  top-biased gradient.
+- **Background**: SceneCapture2D has NO `show_flags` attr (use `show_flag_settings`
+  with EngineShowFlagsSetting to drop Atmosphere/Fog/Cloud) AND the RT clear colour
+  does NOT fill FinalColor empties → add a big two-sided UNLIT emissive `M_Bg` dome.
+- **Exposure**: pin `auto_exposure_min/max_brightness = 5` (+overrides) on the capture
+  post-process so a surface has the SAME brightness in every view (no eye adaptation).
+- `splatkit.ingest` auto-detects the dataset background from image corners so the
+  trainer composites/inits against the real backdrop colour.
 - Offscreen Metal rendering works headless on Apple Silicon. Live result: 80 frames
   rendered; ingest → **T1 reprojection 3e-14 px, T2 all PASS** on authentic UE poses;
   a splat then trains on the UE images (see out/ue_eval2).

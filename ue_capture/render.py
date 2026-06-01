@@ -38,6 +38,20 @@ def _make_capture(unreal, w, h, hfov_deg, capture_source, rtf=None):
                                                      "VolumetricCloud")])
     except Exception:
         pass
+    # Pin exposure (no eye adaptation) so a surface has the SAME brightness in
+    # every view -- essential for multi-view consistency. B=5 well-exposes the
+    # lit scene (validated). Bloom off.
+    try:
+        pp = comp.post_process_settings
+        for k, v in [("auto_exposure_min_brightness", 5.0),
+                     ("auto_exposure_max_brightness", 5.0),
+                     ("override_auto_exposure_min_brightness", True),
+                     ("override_auto_exposure_max_brightness", True),
+                     ("bloom_intensity", 0.0), ("override_bloom_intensity", True)]:
+            pp.set_editor_property(k, v)
+        comp.set_editor_property("post_process_settings", pp)
+    except Exception:
+        pass
     # 8-bit RT so export writes PNG (the float default writes EXR).
     rtf = rtf or unreal.TextureRenderTargetFormat.RTF_RGBA8
     rt = unreal.RenderingLibrary.create_render_target2d(actor, w, h, rtf)
@@ -73,10 +87,10 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
     except Exception:
         pass
 
-    # BASE_COLOR AOV: flat true-colour albedo, view-independent, no lighting/
-    # exposure to tune -- the cleanest input for the SH0 splat.
+    # Lit FinalColorLDR: real shading (depth cues) with matte materials (so it
+    # stays view-independent) + pinned exposure for cross-view consistency.
     col_actor, col_comp, col_rt = _make_capture(
-        unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_BASE_COLOR)
+        unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
     dep_actor = dep_comp = dep_rt = None
     if want_depth:
         dep_actor, dep_comp, dep_rt = _make_capture(
