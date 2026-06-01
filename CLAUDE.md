@@ -64,12 +64,20 @@ A real headless capture was run: `UnrealEditor-Cmd <proj> -ExecutePythonScript=�
 - **PNG output**: create the RT as `TextureRenderTargetFormat.RTF_RGBA8` (the float
   default writes EXR), and `export_render_target` writes the file with NO extension
   → `render._export_png` renames it to `<name>.png`.
-- **Lighting required**: an empty level renders black; `selftest_scene.spawn_scene`
-  spawns two directional lights.
-- `MaterialInstanceDynamic.create` is absent in 5.7 Python, so object colours are
-  best-effort (they render neutral/gray) — cosmetic; doesn't affect poses/gates.
+- **Capture mode = BASE_COLOR AOV** (`SceneCaptureSource.SCS_BASE_COLOR`): flat
+  true-colour albedo, view-independent, no lighting/exposure to tune — the clean
+  input for an SH0 splat. So no lights are spawned. (FINAL_COLOR_LDR needs lights
+  + exposure pinning and the default material is glossy/view-dependent → bad for SH0.)
+- **Colours**: author `M_Splat` (a VectorParameter "Color" wired to BaseColor via
+  MaterialEditingLibrary) and per-object MIDs from it. `MaterialInstanceDynamic.create`
+  is ABSENT in 5.7; use `MaterialLibrary.create_dynamic_material_instance`. The stock
+  BasicShapeMaterial "Color" param does NOT drive the BaseColor G-buffer (renders gray).
+- **Clean background**: SceneCapture2D has NO `show_flags` attribute — disable the sky
+  via `comp.show_flag_settings = [EngineShowFlagsSetting(Atmosphere/Fog/Cloud=False)]`,
+  else the void renders a noisy bright horizon.
 - Offscreen Metal rendering works headless on Apple Silicon. Live result: 80 frames
-  rendered; ingest → **T1 reprojection 3e-14 px, T2 all PASS** on authentic UE poses.
+  rendered; ingest → **T1 reprojection 3e-14 px, T2 all PASS** on authentic UE poses;
+  a splat then trains on the UE images (see out/ue_eval2).
 - Output goes to `out/` (gitignored); committed fixtures stay the numpy stand-in.
   Drive it with `UE_PROJECT=… make capture` (or `UE_CAPTURE_OUT=… UnrealEditor-Cmd …
   -ExecutePythonScript=ue_capture/run_capture.py`).

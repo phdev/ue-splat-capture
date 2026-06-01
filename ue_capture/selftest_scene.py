@@ -56,75 +56,68 @@ def primitives_for_scene_json():
 # --------------------------------------------------------------------------- #
 # Unreal spawning (only runs inside UnrealEditor-Cmd)
 # --------------------------------------------------------------------------- #
-def _colored_material(unreal, rgb, emissive=False):
-    base = unreal.load_object(None, _BASE_MAT)
-    mid = unreal.MaterialInstanceDynamic.create(base, None)
-    col = unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0)
-    for pname in ("Color", "BaseColor", "Tint"):
-        try:
-            mid.set_vector_parameter_value(pname, col)
-        except Exception:
-            pass
-    if emissive:
-        for pname in ("Emissive", "EmissiveColor", "Emissive Color"):
-            try:
-                mid.set_vector_parameter_value(pname, col)
-            except Exception:
-                pass
-    return mid
+def ensure_color_material(unreal):
+    """Author (or load) a tiny material whose 'Color' VectorParameter drives
+    BaseColor directly. Captured via the BASE_COLOR AOV this yields flat, TRUE,
+    view-independent colours (no lighting/exposure to tune) -- ideal for an SH0
+    splat. Validated live on UE 5.7: a red param renders [229,38,31]."""
+    path = "/Game/M_Splat"
+    mat = unreal.load_asset(path)
+    if mat:
+        return mat
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    mat = tools.create_asset("M_Splat", "/Game", unreal.Material, unreal.MaterialFactoryNew())
+    mel = unreal.MaterialEditingLibrary
+    vp = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -350, 0)
+    vp.set_editor_property("parameter_name", "Color")
+    vp.set_editor_property("default_value", unreal.LinearColor(0.6, 0.6, 0.6, 1.0))
+    mel.connect_material_property(vp, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.recompile_material(mat)
+    return mat
 
 
-def _spawn_mesh(unreal, actors_sys, mesh_path, location_cm, scale, rgb, emissive=False):
-    mesh = unreal.load_object(None, mesh_path)
-    loc = unreal.Vector(*location_cm)
-    actor = actors_sys.spawn_actor_from_object(mesh, loc, unreal.Rotator(0, 0, 0))
+def _spawn_mesh(unreal, actors_sys, mat, mesh_path, location_cm, scale, rgb):
+    """Spawn a basic-shape mesh with a per-object coloured instance of `mat`."""
+    mesh = unreal.load_asset(mesh_path)
+    actor = actors_sys.spawn_actor_from_object(mesh, unreal.Vector(*location_cm),
+                                               unreal.Rotator(0, 0, 0))
     comp = actor.static_mesh_component
     comp.set_world_scale3d(unreal.Vector(*scale))
     try:
-        comp.set_material(0, _colored_material(unreal, rgb, emissive))
+        mid = unreal.MaterialLibrary.create_dynamic_material_instance(actor, mat)
+        mid.set_vector_parameter_value("Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
+        comp.set_material(0, mid)
     except Exception as e:  # pragma: no cover - UE only
         unreal.log_warning(f"material set failed: {e}")
     return actor
 
 
 def spawn_scene(unreal):
-    """Spawn lights, platform, objects, and emissive fiducials. Returns actors."""
-    actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    spawned = []
+    """Spawn platform, objects, and fiducials with true-colour matte materials.
 
-    # Two directional lights (key + fill) so every face is lit without needing a
-    # sky dome -- mirrors the numpy raytracer's view-independent shading.
-    actors_sys.spawn_actor_from_class(unreal.DirectionalLight,
-                                      unreal.Vector(0, 0, 500), unreal.Rotator(-50, -30, 0))
-    fill = actors_sys.spawn_actor_from_class(unreal.DirectionalLight,
-                                             unreal.Vector(0, 0, 500), unreal.Rotator(-20, 150, 0))
-    try:
-        fill.directional_light_component.set_intensity(2.0)
-    except Exception:
-        pass
-    try:
-        actors_sys.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 500),
-                                          unreal.Rotator(0, 0, 0))
-    except Exception:
-        pass
+    No lights are needed: capture uses the BASE_COLOR AOV (flat albedo,
+    view-independent), so the scene reconstructs cleanly with an SH0 splat.
+    """
+    actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    mat = ensure_color_material(unreal)
+    spawned = []
 
     # platform: scale the 100cm cube to the platform extents
     pmin, pmax = PLATFORM["min"], PLATFORM["max"]
     size = [(pmax[i] - pmin[i]) / 100.0 for i in range(3)]
     center = [(pmax[i] + pmin[i]) / 2.0 for i in range(3)]
-    spawned.append(_spawn_mesh(unreal, actors_sys, _CUBE_MESH, center, size, PLATFORM["color"]))
+    spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH, center, size, PLATFORM["color"]))
 
     for o in OBJECTS:
         if o["shape"] == "sphere":
             s = [o["radius"] / 50.0] * 3   # basic sphere is 50 cm radius
-            spawned.append(_spawn_mesh(unreal, actors_sys, _SPHERE_MESH, o["center"], s, o["color"]))
+            spawned.append(_spawn_mesh(unreal, actors_sys, mat, _SPHERE_MESH, o["center"], s, o["color"]))
         else:
             size = [(o["max"][i] - o["min"][i]) / 100.0 for i in range(3)]
             center = [(o["max"][i] + o["min"][i]) / 2.0 for i in range(3)]
-            spawned.append(_spawn_mesh(unreal, actors_sys, _CUBE_MESH, center, size, o["color"]))
+            spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH, center, size, o["color"]))
 
     for f in FIDUCIALS:
         s = [f["radius"] / 50.0] * 3
-        spawned.append(_spawn_mesh(unreal, actors_sys, _SPHERE_MESH, f["loc_cm"], s,
-                                   f["color"], emissive=True))
+        spawned.append(_spawn_mesh(unreal, actors_sys, mat, _SPHERE_MESH, f["loc_cm"], s, f["color"]))
     return spawned

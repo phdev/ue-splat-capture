@@ -23,6 +23,21 @@ def _make_capture(unreal, w, h, hfov_deg, capture_source, rtf=None):
     comp = actor.capture_component2d
     comp.fov_angle = hfov_deg
     comp.capture_source = capture_source
+    # Clean background: drop atmosphere/fog/clouds so the empty void renders as
+    # the black clear colour instead of a noisy bright horizon. SceneCapture2D
+    # exposes overrides via `show_flag_settings` (NOT a `show_flags` attribute).
+    try:
+        def _flag(nm):
+            s = unreal.EngineShowFlagsSetting()
+            s.set_editor_property("show_flag_name", nm)
+            s.set_editor_property("enabled", False)
+            return s
+        comp.set_editor_property("show_flag_settings",
+                                 [_flag(n) for n in ("Atmosphere", "Fog",
+                                                     "VolumetricFog", "Cloud",
+                                                     "VolumetricCloud")])
+    except Exception:
+        pass
     # 8-bit RT so export writes PNG (the float default writes EXR).
     rtf = rtf or unreal.TextureRenderTargetFormat.RTF_RGBA8
     rt = unreal.RenderingLibrary.create_render_target2d(actor, w, h, rtf)
@@ -50,8 +65,18 @@ def render_cameras(unreal, poses, w, h, hfov_deg, out_dir, want_depth=True):
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
 
+    # FXAA (no temporal noise), no auto-exposure/bloom/motion-blur.
+    try:
+        for c in ("r.AntiAliasingMethod 2", "r.DefaultFeature.AutoExposure 0",
+                  "r.DefaultFeature.Bloom 0", "r.DefaultFeature.MotionBlur 0"):
+            unreal.SystemLibrary.execute_console_command(world, c)
+    except Exception:
+        pass
+
+    # BASE_COLOR AOV: flat true-colour albedo, view-independent, no lighting/
+    # exposure to tune -- the cleanest input for the SH0 splat.
     col_actor, col_comp, col_rt = _make_capture(
-        unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
+        unreal, w, h, hfov_deg, unreal.SceneCaptureSource.SCS_BASE_COLOR)
     dep_actor = dep_comp = dep_rt = None
     if want_depth:
         dep_actor, dep_comp, dep_rt = _make_capture(
