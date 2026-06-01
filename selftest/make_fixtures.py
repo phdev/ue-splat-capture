@@ -82,6 +82,7 @@ def generate(ss: int = 2) -> dict:
         extra={
             "n_fiducials": len(S.FIDUCIALS),
             "fiducials_world_m": convert.ue_point_to_world(fid_centers).tolist(),
+            "background": scene_dict["background"],
             "render_ss": ss,
             "source": "selftest.make_fixtures (synthetic UE stand-in)",
         })

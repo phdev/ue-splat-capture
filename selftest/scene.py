@@ -14,10 +14,10 @@ from splatkit import convert, geom
 
 TARGET_CENTER_CM = np.array([0.0, 0.0, 35.0])
 ORBIT_RADIUS_CM = 360.0
-RING_ELEVATIONS_DEG = (22.0, 48.0)
-AZIMUTH_STEP_DEG = 15.0          # 24 azimuths per ring -> 48 cameras
+RING_ELEVATIONS_DEG = (18.0, 34.0, 50.0)   # 3-ring hemisphere
+AZIMUTH_STEP_DEG = 15.0          # 24 azimuths per ring -> 72 cameras
 HELDOUT_EVERY = 4                # hold out every 4th camera (interleaved)
-IMG_W = IMG_H = 128
+IMG_W = IMG_H = 96
 HFOV_DEG = 55.0
 
 
@@ -50,10 +50,11 @@ AABB_MAX_CM = [150.0, 150.0, 160.0]
 
 def build_scene() -> dict:
     prims = []
-    # ground plane (checkerboard albedo) at z=0, normal +Z
-    prims.append({"type": "plane", "point": [0.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0],
-                  "mat": _mat([0.8, 0.8, 0.82],
-                              checker={"color2": [0.22, 0.25, 0.30], "scale_cm": 40.0})})
+    # finite checkerboard platform (top face at z=0) -- a self-contained diorama
+    # so everything visible lives inside the target AABB (no infinite ground).
+    prims.append({"type": "box", "min": [-150.0, -150.0, -12.0], "max": [150.0, 150.0, 0.0],
+                  "mat": _mat([0.78, 0.78, 0.80],
+                              checker={"color2": [0.42, 0.45, 0.50], "scale_cm": 75.0})})
     # solid spheres
     prims.append({"type": "sphere", "center": [70.0, 40.0, 45.0], "radius": 45.0,
                   "mat": _mat([0.85, 0.25, 0.20])})
