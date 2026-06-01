@@ -47,7 +47,8 @@ def _bilinear(img, u, v):
 
 def consistency_point_cloud(frames, aabb_min, aabb_max, approx_vox_m=0.05,
                             var_tol=0.02, min_views=4, near=0.2,
-                            max_points=9000, seed=0):
+                            max_points=9000, seed=0, background=None,
+                            bg_reject_tol=0.06):
     centers, res = _voxel_grid(aabb_min, aabb_max, approx_vox_m)
     V = centers.shape[0]
     n = np.zeros(V)
@@ -77,10 +78,20 @@ def consistency_point_cloud(frames, aabb_min, aabb_max, approx_vox_m=0.05,
     var_ch = csqsum / nn - mean * mean
     var = np.where(n >= min_views, var_ch.mean(axis=1).clip(min=0), np.inf)
 
+    # Reject empty space that merely SEES the background: a voxel whose mean
+    # projected colour is ~background is air in front of the backdrop, not a
+    # surface. Critical when the background is flat (e.g. black) -- otherwise
+    # photo-consistency seeds a fog of background-coloured floaters.
+    candidate = n >= min_views
+    if background is not None:
+        bg = np.asarray(background, float)
+        is_fg = np.linalg.norm(mean - bg[None, :], axis=1) > bg_reject_tol
+        candidate = candidate & is_fg
+
     # Rank voxels by photo-consistency (low variance = surface-like) and keep
     # the most consistent ones up to the budget. var_tol only trims obvious air
     # when there is slack under the budget.
-    seen_ok = np.nonzero(n >= min_views)[0]
+    seen_ok = np.nonzero(candidate)[0]
     order = seen_ok[np.argsort(var[seen_ok])]
     if order.size > max_points:
         order = order[:max_points]

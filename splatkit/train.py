@@ -56,7 +56,7 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
         if init == "consistency":
             pts, cols, vox_m = initpc.consistency_point_cloud(
                 train_f, meta["aabb_min"], meta["aabb_max"], max_points=n_gauss,
-                seed=seed)
+                seed=seed, background=bg.cpu().numpy())
         else:
             pts, cols, vox_m = initpc.carve_point_cloud(
                 train_f, bg.cpu().numpy(), meta["aabb_min"], meta["aabb_max"],
