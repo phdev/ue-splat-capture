@@ -1,0 +1,38 @@
+[project]
+name = "ue-splat-capture"
+version = "0.1.0"
+description = "Unreal Engine -> Gaussian-splat capture/train/verify pipeline (Apple Silicon, no CUDA)"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+
+# Every dependency is pinned to an exact version (supply-chain hygiene: no
+# transitive trust). On macOS/arm64 the default PyPI index ships a torch wheel
+# with Metal (MPS) support -- there is NO CUDA index involved anywhere.
+dependencies = [
+    "numpy==2.2.1",
+    "torch==2.5.1",
+    "pillow==12.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+]
+
+# NOTE on the trainer:
+#   The goal names msplat (`pip install msplat[cli]`) as the trainer. msplat is
+#   a CUDA differential-rasterization library; it cannot build or run on Apple
+#   Silicon (no CUDA). It is therefore NOT a dependency here and is deliberately
+#   absent from the lockfile so the committed environment stays resolvable and
+#   reproducible. On a CUDA host you would `pip install msplat[cli]` separately
+#   and run `train.py --backend msplat`. The default Apple-Silicon trainer is
+#   the in-repo torch rasterizer (splatkit/gsmodel.py), `--backend torch`.
+
+[tool.uv]
+# This repo is a collection of runnable modules, not an installable library;
+# uv just manages the locked virtualenv. Modules are imported via PYTHONPATH=.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
