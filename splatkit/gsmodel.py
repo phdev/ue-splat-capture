@@ -3,8 +3,14 @@
 This is the Apple-Silicon trainer backend (msplat is CUDA-only). It implements
 EWA-style splatting with a global per-image depth sort and a vectorized
 alpha-compositing via cumulative product, so PyTorch autograd supplies the
-backward pass -- no custom CUDA/Metal kernels. Colors are view-independent
-(SH degree 0), which is sufficient for the diffuse self-test scene.
+backward pass -- no custom CUDA/Metal kernels.
+
+Colour is VIEW-DEPENDENT via spherical harmonics (default degree 3): each
+gaussian carries an SH DC term + higher-order coefficients, evaluated at the
+per-gaussian viewing direction. SH degree 0 (DC only) is the view-independent
+special case; the higher orders let the splat model mild view-dependence
+(specular highlights, tone-curve shifts) and -- crucially -- GENERALISE it to
+held-out views rather than baking per-training-view appearance.
 
 All randomness is seeded; given a fixed seed and CPU device the result is
 deterministic.
@@ -16,6 +22,47 @@ import torch
 
 NEAR = 0.2          # metres; cull gaussians closer than this
 SCREEN_MARGIN = 0.25  # fraction of image size to keep off-screen gaussians
+
+# Real spherical-harmonics constants (standard 3DGS convention).
+SH_C0 = 0.28209479177387814
+SH_C1 = 0.4886025119029199
+SH_C2 = (1.0925484305920792, -1.0925484305920792, 0.31539156525252005,
+         -1.0925484305920792, 0.5462742152960396)
+SH_C3 = (-0.5900435899266435, 2.890611442640554, -0.4570457994644658,
+         0.3731763325901154, -0.4570457994644658, 1.445305721320277,
+         -0.5900435899266435)
+
+
+def sh_coeffs(degree: int) -> int:
+    return (degree + 1) ** 2
+
+
+def eval_sh(degree: int, sh: torch.Tensor, dirs: torch.Tensor) -> torch.Tensor:
+    """Evaluate SH. sh: (M,K,3) coefficients, dirs: (M,3) unit view dirs.
+    Returns (M,3) (before the +0.5 offset)."""
+    result = SH_C0 * sh[:, 0]
+    if degree >= 1:
+        x, y, z = dirs[:, 0:1], dirs[:, 1:2], dirs[:, 2:3]
+        result = result - SH_C1 * y * sh[:, 1] + SH_C1 * z * sh[:, 2] - SH_C1 * x * sh[:, 3]
+        if degree >= 2:
+            xx, yy, zz = x * x, y * y, z * z
+            xy, yz, xz = x * y, y * z, x * z
+            result = (result
+                      + SH_C2[0] * xy * sh[:, 4]
+                      + SH_C2[1] * yz * sh[:, 5]
+                      + SH_C2[2] * (2.0 * zz - xx - yy) * sh[:, 6]
+                      + SH_C2[3] * xz * sh[:, 7]
+                      + SH_C2[4] * (xx - yy) * sh[:, 8])
+            if degree >= 3:
+                result = (result
+                          + SH_C3[0] * y * (3 * xx - yy) * sh[:, 9]
+                          + SH_C3[1] * xy * z * sh[:, 10]
+                          + SH_C3[2] * y * (4 * zz - xx - yy) * sh[:, 11]
+                          + SH_C3[3] * z * (2 * zz - 3 * xx - 3 * yy) * sh[:, 12]
+                          + SH_C3[4] * x * (4 * zz - xx - yy) * sh[:, 13]
+                          + SH_C3[5] * z * (xx - yy) * sh[:, 14]
+                          + SH_C3[6] * x * (xx - 3 * yy) * sh[:, 15])
+    return result
 
 
 def quat_to_rotmat(q: torch.Tensor) -> torch.Tensor:
@@ -29,16 +76,23 @@ def quat_to_rotmat(q: torch.Tensor) -> torch.Tensor:
     return R
 
 
+def _color_to_dc(colors: torch.Tensor) -> torch.Tensor:
+    """Inverse of the SH render activation for degree 0: dc s.t. SH_C0*dc+0.5=col."""
+    return (colors - 0.5) / SH_C0
+
+
 class GaussianModel:
-    def __init__(self, means, colors, log_scales, quats, logit_opacity, device):
+    def __init__(self, means, sh_dc, sh_rest, log_scales, quats, logit_opacity,
+                 device, sh_degree=3):
         self.device = device
+        self.sh_degree = sh_degree
         self.means = means.to(device).requires_grad_(True)
-        self.colors_raw = colors.to(device).requires_grad_(True)      # -> sigmoid
+        self.sh_dc = sh_dc.to(device).requires_grad_(True)       # (N,3) DC term
+        self.sh_rest = sh_rest.to(device).requires_grad_(True)   # (N,K-1,3)
         self.log_scales = log_scales.to(device).requires_grad_(True)  # -> exp
         self.quats = quats.to(device).requires_grad_(True)
         self.logit_opacity = logit_opacity.to(device).requires_grad_(True)
 
-    # --- views of activated params ---
     @property
     def n(self):
         return self.means.shape[0]
@@ -46,45 +100,57 @@ class GaussianModel:
     def opacity(self):
         return torch.sigmoid(self.logit_opacity)
 
-    def rgb(self):
-        return torch.sigmoid(self.colors_raw)
-
     def scales(self):
         return torch.exp(self.log_scales)
 
+    def sh(self):
+        return torch.cat([self.sh_dc[:, None, :], self.sh_rest], dim=1)  # (N,K,3)
+
+    def colors_view(self, idx, view_dirs):
+        """View-dependent RGB for gaussians `idx` seen along `view_dirs` (M,3)."""
+        sh = torch.cat([self.sh_dc[idx][:, None, :], self.sh_rest[idx]], dim=1)
+        return torch.clamp(eval_sh(self.sh_degree, sh, view_dirs) + 0.5, 0.0, 1.0)
+
     def parameters(self):
-        return [self.means, self.colors_raw, self.log_scales, self.quats,
-                self.logit_opacity]
+        return [self.means, self.sh_dc, self.sh_rest, self.log_scales,
+                self.quats, self.logit_opacity]
 
     def param_groups(self, lr):
         return [
             {"params": [self.means], "lr": lr["means"]},
-            {"params": [self.colors_raw], "lr": lr["color"]},
+            {"params": [self.sh_dc], "lr": lr["color"]},
+            {"params": [self.sh_rest], "lr": lr["color"] * 0.05},  # higher orders slower
             {"params": [self.log_scales], "lr": lr["scale"]},
             {"params": [self.quats], "lr": lr["quat"]},
             {"params": [self.logit_opacity], "lr": lr["opacity"]},
         ]
 
     def state(self):
-        return {k: getattr(self, k).detach().cpu()
-                for k in ("means", "colors_raw", "log_scales", "quats", "logit_opacity")}
+        st = {k: getattr(self, k).detach().cpu()
+              for k in ("means", "sh_dc", "sh_rest", "log_scales", "quats",
+                        "logit_opacity")}
+        st["sh_degree"] = self.sh_degree
+        return st
 
     @classmethod
     def from_state(cls, st, device):
-        return cls(st["means"], st["colors_raw"], st["log_scales"], st["quats"],
-                   st["logit_opacity"], device)
+        return cls(st["means"], st["sh_dc"], st["sh_rest"], st["log_scales"],
+                   st["quats"], st["logit_opacity"], device,
+                   sh_degree=int(st.get("sh_degree", 3)))
 
     @classmethod
     def from_points(cls, points, colors, init_scale, device,
-                    init_opacity=0.25):
+                    init_opacity=0.25, sh_degree=3):
         pts = torch.as_tensor(points, dtype=torch.float32)
-        cols = torch.as_tensor(colors, dtype=torch.float32).clamp(1e-3, 1 - 1e-3)
+        cols = torch.as_tensor(colors, dtype=torch.float32).clamp(0.0, 1.0)
         n = pts.shape[0]
-        colors_raw = torch.logit(cols)
+        sh_dc = _color_to_dc(cols)
+        sh_rest = torch.zeros(n, sh_coeffs(sh_degree) - 1, 3)
         log_scales = torch.full((n, 3), float(np.log(init_scale)))
         quats = torch.zeros(n, 4); quats[:, 0] = 1.0
         logit_opacity = torch.full((n,), float(np.log(init_opacity / (1 - init_opacity))))
-        return cls(pts, colors_raw, log_scales, quats, logit_opacity, device)
+        return cls(pts, sh_dc, sh_rest, log_scales, quats, logit_opacity, device,
+                   sh_degree=sh_degree)
 
 
 @torch.no_grad()
@@ -102,11 +168,12 @@ def clone_split_prune(model: "GaussianModel", grad_avg: torch.Tensor,
     dev = model.device
     means = model.means.detach(); logsc = model.log_scales.detach()
     quats = model.quats.detach(); logop = model.logit_opacity.detach()
-    col = model.colors_raw.detach()
+    sdc = model.sh_dc.detach(); srest = model.sh_rest.detach()
     scales = torch.exp(logsc); opac = torch.sigmoid(logop)
 
     keep = (opac > min_opacity) & (scales.max(dim=1).values < max_scale)
-    M, LS, Q, LO, C = means[keep], logsc[keep], quats[keep], logop[keep], col[keep]
+    M, LS, Q, LO = means[keep], logsc[keep], quats[keep], logop[keep]
+    SDC, SR = sdc[keep], srest[keep]
     S = scales[keep]
     ga = grad_avg[keep]
     maxs = S.max(dim=1).values
@@ -125,24 +192,24 @@ def clone_split_prune(model: "GaussianModel", grad_avg: torch.Tensor,
     si = split.nonzero(as_tuple=False).squeeze(1)
     log16 = float(np.log(1.6))
 
-    parts_m = [M[~split]]; parts_ls = [LS[~split]]; parts_q = [Q[~split]]
-    parts_lo = [LO[~split]]; parts_c = [C[~split]]
+    pm = [M[~split]]; pls = [LS[~split]]; pq = [Q[~split]]
+    plo = [LO[~split]]; pdc = [SDC[~split]]; pr = [SR[~split]]
     if ci.numel():
-        parts_m.append(jit(ci, S)); parts_ls.append(LS[ci]); parts_q.append(Q[ci])
-        parts_lo.append(LO[ci]); parts_c.append(C[ci])
+        pm.append(jit(ci, S)); pls.append(LS[ci]); pq.append(Q[ci])
+        plo.append(LO[ci]); pdc.append(SDC[ci]); pr.append(SR[ci])
     for _ in range(2):  # two children per split
         if si.numel():
-            parts_m.append(jit(si, S)); parts_ls.append(LS[si] - log16)
-            parts_q.append(Q[si]); parts_lo.append(LO[si]); parts_c.append(C[si])
+            pm.append(jit(si, S)); pls.append(LS[si] - log16); pq.append(Q[si])
+            plo.append(LO[si]); pdc.append(SDC[si]); pr.append(SR[si])
 
-    nm = torch.cat(parts_m); nls = torch.cat(parts_ls); nq = torch.cat(parts_q)
-    nlo = torch.cat(parts_lo); nc = torch.cat(parts_c)
+    nm = torch.cat(pm); nls = torch.cat(pls); nq = torch.cat(pq)
+    nlo = torch.cat(plo); ndc = torch.cat(pdc); nr = torch.cat(pr)
 
     if nm.shape[0] > max_points:                       # cap: keep most opaque
         order = torch.argsort(torch.sigmoid(nlo), descending=True)[:max_points]
         nm, nls, nq = nm[order], nls[order], nq[order]
-        nlo, nc = nlo[order], nc[order]
-    return GaussianModel(nm, nc, nls, nq, nlo, dev)
+        nlo, ndc, nr = nlo[order], ndc[order], nr[order]
+    return GaussianModel(nm, ndc, nr, nls, nq, nlo, dev, sh_degree=model.sh_degree)
 
 
 def _covariance3d(scales, R):
@@ -178,7 +245,12 @@ def render(model: GaussianModel, cam: dict, bg: torch.Tensor,
     scales = model.scales()[idx]
     R = quat_to_rotmat(model.quats[idx])
     opacity = model.opacity()[idx]
-    rgb = model.rgb()[idx]
+
+    # view-dependent colour: SH evaluated at the camera->gaussian direction
+    cam_center = -(R_w2c.T @ t_w2c)                         # world-space eye
+    view_dirs = model.means[idx] - cam_center
+    view_dirs = view_dirs / (view_dirs.norm(dim=1, keepdim=True) + 1e-9)
+    rgb = model.colors_view(idx, view_dirs)                 # (M,3)
 
     Sigma = _covariance3d(scales, R)                        # (M,3,3)
     zc = z
@@ -195,7 +267,6 @@ def render(model: GaussianModel, cam: dict, bg: torch.Tensor,
     b = cov2d[:, 0, 1]
     c = cov2d[:, 1, 1]
     det = (a * c - b * b).clamp_min(1e-9)
-    # conic = inverse(cov2d)
     ca = c / det
     cb = -b / det
     cc = a / det
@@ -236,7 +307,7 @@ def render(model: GaussianModel, cam: dict, bg: torch.Tensor,
 # Initialisation
 # --------------------------------------------------------------------------- #
 def init_from_cameras(aabb_min, aabb_max, n_gauss, cams, gt_images,
-                      seed=0, init_scale=0.06, device="cpu"):
+                      seed=0, init_scale=0.06, device="cpu", sh_degree=3):
     """Random means within the AABB; per-gaussian colour seeded by averaging the
     pixels each gaussian projects to across the training views (huge convergence
     head-start vs. random colour)."""
@@ -246,7 +317,6 @@ def init_from_cameras(aabb_min, aabb_max, n_gauss, cams, gt_images,
     span = aabb_max - aabb_min
     means = aabb_min + torch.rand(n_gauss, 3, generator=g) * span
 
-    # colour-from-images init
     colors = torch.full((n_gauss, 3), 0.5)
     counts = torch.zeros(n_gauss)
     accum = torch.zeros(n_gauss, 3)
@@ -262,14 +332,15 @@ def init_from_cameras(aabb_min, aabb_max, n_gauss, cams, gt_images,
         ok = (z > NEAR) & (ui >= 0) & (ui < W) & (vi >= 0) & (vi < H)
         idx = ok.nonzero(as_tuple=False).squeeze(1)
         if idx.numel():
-            cols = img[vi[idx], ui[idx]]               # (k,3)
-            accum[idx] += cols
+            accum[idx] += img[vi[idx], ui[idx]]
             counts[idx] += 1
     seen = counts > 0
     colors[seen] = accum[seen] / counts[seen][:, None]
 
-    colors_raw = torch.logit(colors.clamp(1e-3, 1 - 1e-3))
+    sh_dc = _color_to_dc(colors.clamp(0.0, 1.0))
+    sh_rest = torch.zeros(n_gauss, sh_coeffs(sh_degree) - 1, 3)
     log_scales = torch.full((n_gauss, 3), float(np.log(init_scale)))
     quats = torch.zeros(n_gauss, 4); quats[:, 0] = 1.0
-    logit_opacity = torch.full((n_gauss,), float(np.log(0.2 / 0.8)))  # ~0.2
-    return GaussianModel(means, colors_raw, log_scales, quats, logit_opacity, device)
+    logit_opacity = torch.full((n_gauss,), float(np.log(0.2 / 0.8)))
+    return GaussianModel(means, sh_dc, sh_rest, log_scales, quats, logit_opacity,
+                         device, sh_degree=sh_degree)
