@@ -101,28 +101,53 @@ def ensure_bg_material(unreal):
     return mat
 
 
-def ensure_platform_material(unreal, cell_cm=35.0):
-    """Matte PROCEDURAL-feature platform material: BaseColor = frac(worldpos.xy /
-    cell). Gives the big flat plane dense, smooth (alias-free), VIEW-INDEPENDENT
-    features so the splat locks its geometry -- without BasicShapeMaterial's
-    view-dependent specular (which it can't zero) or a flat plane's underfit."""
+def ensure_platform_material(unreal, cell_cm=18.0):
+    """Matte FINE HARD-CHECKER platform material -> dense, high-contrast,
+    VIEW-INDEPENDENT features so the splat both locks the plane's geometry AND
+    generalises to held-out views. checker = frac((floor(x/c)+floor(y/c))/2)*2;
+    BaseColor = lerp(colA, colB, checker); Roughness 1, Specular 0.
+    (Flat underfits; coarse tiles too sparse; BasicShapeMaterial has un-zeroable
+    view-dependent specular -> held-out gap.)"""
     mel = unreal.MaterialEditingLibrary
     mat = _fresh_material(unreal, "M_PlatMatte")
-    wp = mel.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -700, 0)
-    mask = mel.create_material_expression(mat, unreal.MaterialExpressionComponentMask, -520, 0)
-    mask.set_editor_property("r", True); mask.set_editor_property("g", True)
-    mask.set_editor_property("b", False); mask.set_editor_property("a", False)
-    mel.connect_material_expressions(wp, "", mask, "")
-    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -360, 0)
-    mul.set_editor_property("const_b", 1.0 / cell_cm)
-    mel.connect_material_expressions(mask, "", mul, "A")
-    fr = mel.create_material_expression(mat, unreal.MaterialExpressionFrac, -200, 0)
-    mel.connect_material_expressions(mul, "", fr, "")
-    mel.connect_material_property(fr, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    cr = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -200, 200)
-    cr.set_editor_property("r", 1.0); mel.connect_material_property(cr, "", unreal.MaterialProperty.MP_ROUGHNESS)
-    cs = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -200, 320)
-    cs.set_editor_property("r", 0.0); mel.connect_material_property(cs, "", unreal.MaterialProperty.MP_SPECULAR)
+
+    def E(cls, x, y):
+        return mel.create_material_expression(mat, cls, x, y)
+
+    def C(a, ao, b, bi):
+        mel.connect_material_expressions(a, ao, b, bi)
+
+    wp = E(unreal.MaterialExpressionWorldPosition, -1000, 0)
+    mxy = E(unreal.MaterialExpressionComponentMask, -860, 0)
+    mxy.set_editor_property("r", True); mxy.set_editor_property("g", True)
+    mxy.set_editor_property("b", False); mxy.set_editor_property("a", False)
+    C(wp, "", mxy, "")
+    mul = E(unreal.MaterialExpressionMultiply, -720, 0); mul.set_editor_property("const_b", 1.0 / cell_cm)
+    C(mxy, "", mul, "A")
+    flr = E(unreal.MaterialExpressionFloor, -600, 0); C(mul, "", flr, "")
+    fx = E(unreal.MaterialExpressionComponentMask, -480, -60)
+    fx.set_editor_property("r", True); fx.set_editor_property("g", False)
+    fx.set_editor_property("b", False); fx.set_editor_property("a", False); C(flr, "", fx, "")
+    fy = E(unreal.MaterialExpressionComponentMask, -480, 80)
+    fy.set_editor_property("r", False); fy.set_editor_property("g", True)
+    fy.set_editor_property("b", False); fy.set_editor_property("a", False); C(flr, "", fy, "")
+    add = E(unreal.MaterialExpressionAdd, -360, 0); C(fx, "", add, "A"); C(fy, "", add, "B")
+    half = E(unreal.MaterialExpressionMultiply, -260, 0); half.set_editor_property("const_b", 0.5)
+    C(add, "", half, "A")
+    fr = E(unreal.MaterialExpressionFrac, -180, 0); C(half, "", fr, "")
+    chk = E(unreal.MaterialExpressionMultiply, -100, 0); chk.set_editor_property("const_b", 2.0)
+    C(fr, "", chk, "A")
+    cA = E(unreal.MaterialExpressionConstant3Vector, -260, 200)
+    cA.set_editor_property("constant", unreal.LinearColor(0.85, 0.80, 0.45, 1.0))
+    cB = E(unreal.MaterialExpressionConstant3Vector, -260, 330)
+    cB.set_editor_property("constant", unreal.LinearColor(0.18, 0.45, 0.62, 1.0))
+    lerp = E(unreal.MaterialExpressionLinearInterpolate, 60, 0)
+    C(cA, "", lerp, "A"); C(cB, "", lerp, "B"); C(chk, "", lerp, "Alpha")
+    mel.connect_material_property(lerp, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    cr = E(unreal.MaterialExpressionConstant, 60, 220); cr.set_editor_property("r", 1.0)
+    mel.connect_material_property(cr, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    cs = E(unreal.MaterialExpressionConstant, 60, 330); cs.set_editor_property("r", 0.0)
+    mel.connect_material_property(cs, "", unreal.MaterialProperty.MP_SPECULAR)
     mel.recompile_material(mat)
     return mat
 
@@ -160,6 +185,7 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
+    plat_mat = ensure_platform_material(unreal)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
@@ -183,26 +209,12 @@ def spawn_scene(unreal):
     except Exception as e:  # pragma: no cover
         unreal.log_warning(f"dome material: {e}")
 
-    # platform as a grid of flat-MATTE coloured tiles: strong colour-boundary
-    # features (so the splat locks the plane's geometry) with ZERO specular
-    # (view-independent -> generalises to held-out views). A single textured tile
-    # either underfits (flat) or has un-zeroable specular (BasicShapeMaterial).
-    n = 10                                # 10x10 tiles -> DENSE features (30 cm)
-    ext = PLATFORM["max"][0]              # 150 cm half-extent
-    tile = 2 * ext / n
-    # bright, saturated, distinct colours -> strong features that survive
-    # exposure (muted/dark tiles gave weak features -> underfit).
-    palette = [[0.85, 0.25, 0.20], [0.20, 0.45, 0.85], [0.95, 0.80, 0.20],
-               [0.30, 0.70, 0.40], [0.60, 0.40, 0.80], [0.90, 0.55, 0.20],
-               [0.20, 0.70, 0.70], [0.85, 0.85, 0.88]]
-    for i in range(n):
-        for j in range(n):
-            cx = -ext + tile * (i + 0.5)
-            cy = -ext + tile * (j + 0.5)
-            col = palette[(i * 3 + j * 2 + i * j) % len(palette)]
-            spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH,
-                                       [cx, cy, -6.0],
-                                       [tile / 100.0, tile / 100.0, 0.12], col))
+    # platform: single slab with the fine matte hard-checker material
+    pmin, pmax = PLATFORM["min"], PLATFORM["max"]
+    size = [(pmax[i] - pmin[i]) / 100.0 for i in range(3)]
+    center = [(pmax[i] + pmin[i]) / 2.0 for i in range(3)]
+    spawned.append(_spawn_mesh(unreal, actors_sys, plat_mat, _CUBE_MESH, center, size,
+                               PLATFORM["color"]))
 
     for o in OBJECTS:
         if o["shape"] == "sphere":
