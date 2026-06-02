@@ -50,6 +50,14 @@ Always invoke via `uv run` (Makefile does). Set `PYTORCH_ENABLE_MPS_FALLBACK=1`
 - The recon trainer: consistency (photo-consistency / voxel-colouring) init →
   Adam → grad-driven densify/prune. Fixed seeds; deterministic given device.
   Tunables: `ITERS`, `NGAUSS`, `--scale-split`, densify schedule in `train.py`.
+- **SH colour**: `gsmodel` supports view-dependent spherical-harmonics colour;
+  `--sh-degree` (default **0** = view-independent). Degree 0 is best for these
+  sparse (~54-view) captures. Higher degrees OVERFIT sparse captures: on the UE
+  capture, SH degree 3 made held-out WORSE (22.3 vs 23.7 dB) and grew the
+  train→held-out gap (4.5→6.7) — the extra view-dependent capacity memorizes
+  per-training-view appearance instead of generalizing. (Synthetic, being
+  view-independent, is unaffected: 33.0 @ deg0, 33.5 @ deg3.) Raise the degree
+  only with many more views.
 - **Buffered output:** when running training to a file, use `python -u` and do
   NOT pipe through `tail` (tail only flushes at EOF — you'll see nothing live).
 - Training is slow-ish on MPS (full-image O(N·P) rasteriser, no tiling). 96×96

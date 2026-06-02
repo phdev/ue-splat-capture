@@ -19,9 +19,10 @@ OVERFIT_GAP_DB = 8.0     # train_psnr - heldout_psnr must stay below this
 
 
 def run(transforms_path: str, iters: int, n_gauss: int, seed: int,
-        device=None, save_dir: str | None = "out/eval") -> dict:
+        device=None, save_dir: str | None = "out/eval", sh_degree: int = 0) -> dict:
     model, meta, train_f, held_f, info = T.train(
-        transforms_path, iters=iters, n_gauss=n_gauss, seed=seed, device=device)
+        transforms_path, iters=iters, n_gauss=n_gauss, seed=seed, device=device,
+        sh_degree=sh_degree)
     bg = meta["bg"]
 
     held = ev.evaluate(model, held_f, bg, save_dir=save_dir)
@@ -55,8 +56,12 @@ def main() -> int:
     ap.add_argument("--n-gauss", type=int, default=6000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--sh-degree", type=int, default=0,
+                    help="0=view-independent (best for sparse captures); >0 adds "
+                         "view-dependent SH but overfits with few views")
     args = ap.parse_args()
-    res = run(args.transforms, args.iters, args.n_gauss, args.seed, args.device)
+    res = run(args.transforms, args.iters, args.n_gauss, args.seed, args.device,
+              sh_degree=args.sh_degree)
     doc = R.write_tier("t3", res["checks"],
                        heldout=res["heldout"], train=res["train"],
                        device=res["device"], iters=res["iters"],

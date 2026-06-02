@@ -36,7 +36,7 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
           init: str = "consistency", densify: bool = True, densify_from: int = 150,
           densify_until_frac: float = 0.6, densify_interval: int = 100,
           densify_frac: float = 0.15, scale_split: float = 0.05,
-          max_points: int = 18000, verbose: bool = True):
+          max_points: int = 18000, sh_degree: int = 0, verbose: bool = True):
     if backend == "msplat":
         raise RuntimeError(
             "msplat backend requires a CUDA host (msplat is CUDA-only). On this "
@@ -66,12 +66,12 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
                   flush=True)
         model = gsmodel.GaussianModel.from_points(
             pts, cols, init_scale=max(vox_m * 1.1, 0.03), device=device,
-            init_opacity=0.7)
+            init_opacity=0.7, sh_degree=sh_degree)
     else:
         model = gsmodel.init_from_cameras(
             meta["aabb_min"], meta["aabb_max"], n_gauss,
             cams=train_f, gt_images=[f["image"] for f in train_f],
-            seed=seed, device=device)
+            seed=seed, device=device, sh_degree=sh_degree)
     opt = torch.optim.Adam(model.param_groups(lr), eps=1e-15)
 
     if verbose:
@@ -132,7 +132,7 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
 
     info = {"iters": iters, "n_gauss_init": n_gauss, "n_gauss_final": model.n,
             "seed": seed, "device": device, "backend": backend,
-            "n_train": len(train_f), "n_heldout": len(held_f),
+            "n_train": len(train_f), "n_heldout": len(held_f), "sh_degree": sh_degree,
             "densify": densify, "lambda_ssim": lambda_ssim,
             "train_seconds": time.time() - t0, "history": hist}
     return model, meta, train_f, held_f, info
@@ -148,11 +148,13 @@ def main() -> int:
     ap.add_argument("--backend", default="torch", choices=["torch", "msplat"])
     ap.add_argument("--init", default="consistency",
                     choices=["consistency", "carve", "random"])
+    ap.add_argument("--sh-degree", type=int, default=0)
     ap.add_argument("--checkpoint", default="out/model.pt")
     args = ap.parse_args()
     model, meta, train_f, held_f, info = train(
         args.transforms, iters=args.iters, n_gauss=args.n_gauss,
-        seed=args.seed, device=args.device, backend=args.backend, init=args.init)
+        seed=args.seed, device=args.device, backend=args.backend, init=args.init,
+        sh_degree=args.sh_degree)
     os.makedirs(os.path.dirname(args.checkpoint), exist_ok=True)
     torch.save({"state": model.state(), "info": info}, args.checkpoint)
     print(f"saved checkpoint -> {args.checkpoint}  ({info['train_seconds']:.1f}s)")
