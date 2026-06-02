@@ -167,6 +167,10 @@ def _spawn_mesh(unreal, actors_sys, mat, mesh_path, location_cm, scale, rgb):
             mid.set_vector_parameter_value("Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
         except Exception:
             pass
+        try:  # BasicShapeMaterial platform -> force matte (best-effort)
+            mid.set_scalar_parameter_value("Roughness", 1.0)
+        except Exception:
+            pass
         comp.set_material(0, mid)
     except Exception as e:  # pragma: no cover - UE only
         unreal.log_warning(f"material set failed: {e}")
@@ -185,7 +189,12 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    plat_mat = ensure_platform_material(unreal)
+    # Best empirical platform: the engine grid material (dense fine features ->
+    # best geometry lock / highest held-out PSNR, 23.7 dB). It has un-zeroable
+    # specular (a ~4 dB held-out gap); authored matte alternatives close the gap
+    # but render too dark/sparse at the fixed exposure and underfit. The matte
+    # fine-checker (ensure_platform_material) is kept as a documented alternative.
+    plat_mat = unreal.load_asset(_BASE_MAT)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
