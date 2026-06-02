@@ -133,9 +133,6 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    # textured platform (engine grid material) gives the big flat plane dense
-    # photometric features; supersampling (render.py) keeps it alias-free.
-    plat_mat = unreal.load_asset(_BASE_MAT)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
@@ -163,7 +160,9 @@ def spawn_scene(unreal):
     pmin, pmax = PLATFORM["min"], PLATFORM["max"]
     size = [(pmax[i] - pmin[i]) / 100.0 for i in range(3)]
     center = [(pmax[i] + pmin[i]) / 2.0 for i in range(3)]
-    spawned.append(_spawn_mesh(unreal, actors_sys, plat_mat, _CUBE_MESH, center, size, PLATFORM["color"]))
+    # platform uses the matte material too (BasicShapeMaterial's specular is not
+    # zeroable and its view-dependent highlights blow up the held-out gap).
+    spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH, center, size, PLATFORM["color"]))
 
     for o in OBJECTS:
         if o["shape"] == "sphere":
