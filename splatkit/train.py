@@ -46,6 +46,8 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
 
     device = device or env_device_default()
     lr = lr or DEFAULT_LR
+    lambda_ssim = float(os.environ.get("SPLAT_LAMBDA_SSIM", lambda_ssim))
+    max_points = int(os.environ.get("SPLAT_MAX_POINTS", max_points))
     _seed_everything(seed)
 
     frames, meta = data.load_dataset(transforms_path, device=device)

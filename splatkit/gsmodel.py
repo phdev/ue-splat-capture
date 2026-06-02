@@ -17,6 +17,8 @@ deterministic.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import torch
 
@@ -222,6 +224,7 @@ def render(model: GaussianModel, cam: dict, bg: torch.Tensor,
            blur: float = 0.12) -> torch.Tensor:
     """Render one camera. cam: R_w2c(3,3), t_w2c(3,), fx,fy,cx,cy,W,H tensors/floats.
     Returns image (H, W, 3) with autograd attached."""
+    blur = float(os.environ.get("SPLAT_BLUR", blur))   # 2D antialias floor (px^2)
     device = model.device
     R_w2c = cam["R_w2c"].to(device)
     t_w2c = cam["t_w2c"].to(device)
