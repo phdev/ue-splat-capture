@@ -180,7 +180,15 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    plat_mat = ensure_platform_material(unreal)   # bright dense matte texture
+    # Best empirical platform (23.7 dB held-out): the engine grid material -- its
+    # dense fine features give the best geometry lock. It carries un-zeroable
+    # specular (a ~4 dB held-out gap), but every matte alternative I tried
+    # (flat / tiles / procedural checker / authored bright TEXTURE asset at several
+    # exposures) under-fits more than that gap costs: UE's filmic tonemapper makes
+    # vivid colours either dark (low EV target) or desaturated (bright), so a matte
+    # texture never matches the grid's feature density. `ensure_platform_material`
+    # (bright dense matte texture) is kept as a documented alternative.
+    plat_mat = unreal.load_asset(_BASE_MAT)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
