@@ -187,9 +187,9 @@ def spawn_scene(unreal):
     # features (so the splat locks the plane's geometry) with ZERO specular
     # (view-independent -> generalises to held-out views). A single textured tile
     # either underfits (flat) or has un-zeroable specular (BasicShapeMaterial).
-    n = 4
+    n = 10                                # 10x10 tiles -> DENSE features (30 cm)
     ext = PLATFORM["max"][0]              # 150 cm half-extent
-    tile = 2 * ext / n                    # 75 cm
+    tile = 2 * ext / n
     # bright, saturated, distinct colours -> strong features that survive
     # exposure (muted/dark tiles gave weak features -> underfit).
     palette = [[0.85, 0.25, 0.20], [0.20, 0.45, 0.85], [0.95, 0.80, 0.20],
