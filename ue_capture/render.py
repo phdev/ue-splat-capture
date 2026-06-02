@@ -46,9 +46,10 @@ def _make_capture(unreal, w, h, hfov_deg, capture_source, rtf=None):
     # every view -- essential for multi-view consistency. B=5 well-exposes the
     # lit scene (validated). Bloom off.
     try:
+        ev = float(os.environ.get("UE_CAPTURE_EV", "5.0"))   # pinned exposure target
         pp = comp.post_process_settings
-        for k, v in [("auto_exposure_min_brightness", 5.0),
-                     ("auto_exposure_max_brightness", 5.0),
+        for k, v in [("auto_exposure_min_brightness", ev),
+                     ("auto_exposure_max_brightness", ev),
                      ("override_auto_exposure_min_brightness", True),
                      ("override_auto_exposure_max_brightness", True),
                      ("bloom_intensity", 0.0), ("override_bloom_intensity", True)]:

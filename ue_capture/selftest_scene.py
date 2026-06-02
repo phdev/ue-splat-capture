@@ -6,6 +6,8 @@ here as plain dicts (no numpy) because this runs inside UnrealEditor-Cmd.
 """
 from __future__ import annotations
 
+import os
+
 # --- canonical scene (UE convention: centimetres, Z-up) -------------------- #
 INTRINSICS = {"w": 96, "h": 96, "hfov_deg": 55.0}
 BACKGROUND = [0.12, 0.14, 0.18]
@@ -101,52 +103,41 @@ def ensure_bg_material(unreal):
     return mat
 
 
-def ensure_platform_material(unreal, cell_cm=18.0):
-    """Matte FINE HARD-CHECKER platform material -> dense, high-contrast,
-    VIEW-INDEPENDENT features so the splat both locks the plane's geometry AND
-    generalises to held-out views. checker = frac((floor(x/c)+floor(y/c))/2)*2;
-    BaseColor = lerp(colA, colB, checker); Roughness 1, Specular 0.
-    (Flat underfits; coarse tiles too sparse; BasicShapeMaterial has un-zeroable
-    view-dependent specular -> held-out gap.)"""
+_FLOOR_TEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "floor_tex.png")
+
+
+def ensure_platform_material(unreal, tiling=3.0):
+    """Matte TEXTURED platform material: a bright, dense, high-contrast colour
+    checker PNG (assets/floor_tex.png) sampled with UV tiling, Roughness 1,
+    Specular 0. Bright high-albedo cells stay well-exposed (vs dark procedural
+    patterns that underfit); dense distinct colours give strong VIEW-INDEPENDENT
+    features so the splat locks geometry AND generalises to held-out views."""
+    if unreal.EditorAssetLibrary.does_asset_exist("/Game/T_Floor"):
+        unreal.EditorAssetLibrary.delete_asset("/Game/T_Floor")
+    task = unreal.AssetImportTask()
+    task.set_editor_property("filename", _FLOOR_TEX)
+    task.set_editor_property("destination_path", "/Game")
+    task.set_editor_property("destination_name", "T_Floor")
+    task.set_editor_property("automated", True)
+    task.set_editor_property("replace_existing", True)
+    task.set_editor_property("save", False)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    tex = unreal.load_asset("/Game/T_Floor")
+
     mel = unreal.MaterialEditingLibrary
-    mat = _fresh_material(unreal, "M_PlatMatte")
-
-    def E(cls, x, y):
-        return mel.create_material_expression(mat, cls, x, y)
-
-    def C(a, ao, b, bi):
-        mel.connect_material_expressions(a, ao, b, bi)
-
-    wp = E(unreal.MaterialExpressionWorldPosition, -1000, 0)
-    mxy = E(unreal.MaterialExpressionComponentMask, -860, 0)
-    mxy.set_editor_property("r", True); mxy.set_editor_property("g", True)
-    mxy.set_editor_property("b", False); mxy.set_editor_property("a", False)
-    C(wp, "", mxy, "")
-    mul = E(unreal.MaterialExpressionMultiply, -720, 0); mul.set_editor_property("const_b", 1.0 / cell_cm)
-    C(mxy, "", mul, "A")
-    flr = E(unreal.MaterialExpressionFloor, -600, 0); C(mul, "", flr, "")
-    fx = E(unreal.MaterialExpressionComponentMask, -480, -60)
-    fx.set_editor_property("r", True); fx.set_editor_property("g", False)
-    fx.set_editor_property("b", False); fx.set_editor_property("a", False); C(flr, "", fx, "")
-    fy = E(unreal.MaterialExpressionComponentMask, -480, 80)
-    fy.set_editor_property("r", False); fy.set_editor_property("g", True)
-    fy.set_editor_property("b", False); fy.set_editor_property("a", False); C(flr, "", fy, "")
-    add = E(unreal.MaterialExpressionAdd, -360, 0); C(fx, "", add, "A"); C(fy, "", add, "B")
-    half = E(unreal.MaterialExpressionMultiply, -260, 0); half.set_editor_property("const_b", 0.5)
-    C(add, "", half, "A")
-    fr = E(unreal.MaterialExpressionFrac, -180, 0); C(half, "", fr, "")
-    chk = E(unreal.MaterialExpressionMultiply, -100, 0); chk.set_editor_property("const_b", 2.0)
-    C(fr, "", chk, "A")
-    cA = E(unreal.MaterialExpressionConstant3Vector, -260, 200)
-    cA.set_editor_property("constant", unreal.LinearColor(0.85, 0.80, 0.45, 1.0))
-    cB = E(unreal.MaterialExpressionConstant3Vector, -260, 330)
-    cB.set_editor_property("constant", unreal.LinearColor(0.18, 0.45, 0.62, 1.0))
-    lerp = E(unreal.MaterialExpressionLinearInterpolate, 60, 0)
-    C(cA, "", lerp, "A"); C(cB, "", lerp, "B"); C(chk, "", lerp, "Alpha")
-    mel.connect_material_property(lerp, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    cr = E(unreal.MaterialExpressionConstant, 60, 220); cr.set_editor_property("r", 1.0)
+    mat = _fresh_material(unreal, "M_PlatTex")
+    tc = mel.create_material_expression(mat, unreal.MaterialExpressionTextureCoordinate, -500, 0)
+    tc.set_editor_property("u_tiling", tiling)
+    tc.set_editor_property("v_tiling", tiling)
+    ts = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSample, -300, 0)
+    ts.set_editor_property("texture", tex)
+    mel.connect_material_expressions(tc, "", ts, "UVs")
+    mel.connect_material_property(ts, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    cr = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -300, 220)
+    cr.set_editor_property("r", 1.0)
     mel.connect_material_property(cr, "", unreal.MaterialProperty.MP_ROUGHNESS)
-    cs = E(unreal.MaterialExpressionConstant, 60, 330); cs.set_editor_property("r", 0.0)
+    cs = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -300, 330)
+    cs.set_editor_property("r", 0.0)
     mel.connect_material_property(cs, "", unreal.MaterialProperty.MP_SPECULAR)
     mel.recompile_material(mat)
     return mat
@@ -189,12 +180,7 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    # Best empirical platform: the engine grid material (dense fine features ->
-    # best geometry lock / highest held-out PSNR, 23.7 dB). It has un-zeroable
-    # specular (a ~4 dB held-out gap); authored matte alternatives close the gap
-    # but render too dark/sparse at the fixed exposure and underfit. The matte
-    # fine-checker (ensure_platform_material) is kept as a documented alternative.
-    plat_mat = unreal.load_asset(_BASE_MAT)
+    plat_mat = ensure_platform_material(unreal)   # bright dense matte texture
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
