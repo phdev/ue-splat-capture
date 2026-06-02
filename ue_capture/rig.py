@@ -71,11 +71,15 @@ def _poly_at(closed_pts, cum, s):
 
 
 def default_rig(center_cm=(0.0, 0.0, 35.0), radius_cm=360.0, include_walk=False):
-    """Canonical self-test rig: 3 orbit rings (held-out interleaved). The
-    interior walk is available (`interior_walk`, unit-tested) but OFF by default
-    for the recon self-test -- those few interior-only train views pull splat
-    capacity away from the orbit and widen the held-out gap."""
-    poses = orbit_hemisphere(center_cm, radius_cm, elevations_deg=(18.0, 34.0, 50.0))
+    """Canonical self-test rig: a DENSE orbit hemisphere -- 4 rings x 30 azimuths
+    (12 deg) = 120 cameras, held out every 5th (interleaved). Denser angular
+    coverage means held-out views sit closer to training views (easier to
+    reconstruct) and gives enough views to support view-dependent SH without
+    overfitting. The interior walk is available (`interior_walk`, unit-tested)
+    but OFF by default."""
+    poses = orbit_hemisphere(center_cm, radius_cm,
+                             elevations_deg=(16.0, 30.0, 44.0, 58.0),
+                             n_azimuth=30, heldout_every=5)
     if include_walk:
         poses += interior_walk(
             waypoints_cm=[[200, 0, 0], [0, 200, 0], [-200, 0, 0], [0, -200, 0]],
