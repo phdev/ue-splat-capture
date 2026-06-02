@@ -101,8 +101,36 @@ def ensure_bg_material(unreal):
     return mat
 
 
+def ensure_platform_material(unreal, cell_cm=35.0):
+    """Matte PROCEDURAL-feature platform material: BaseColor = frac(worldpos.xy /
+    cell). Gives the big flat plane dense, smooth (alias-free), VIEW-INDEPENDENT
+    features so the splat locks its geometry -- without BasicShapeMaterial's
+    view-dependent specular (which it can't zero) or a flat plane's underfit."""
+    mel = unreal.MaterialEditingLibrary
+    mat = _fresh_material(unreal, "M_PlatMatte")
+    wp = mel.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -700, 0)
+    mask = mel.create_material_expression(mat, unreal.MaterialExpressionComponentMask, -520, 0)
+    mask.set_editor_property("r", True); mask.set_editor_property("g", True)
+    mask.set_editor_property("b", False); mask.set_editor_property("a", False)
+    mel.connect_material_expressions(wp, "", mask, "")
+    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -360, 0)
+    mul.set_editor_property("const_b", 1.0 / cell_cm)
+    mel.connect_material_expressions(mask, "", mul, "A")
+    fr = mel.create_material_expression(mat, unreal.MaterialExpressionFrac, -200, 0)
+    mel.connect_material_expressions(mul, "", fr, "")
+    mel.connect_material_property(fr, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    cr = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -200, 200)
+    cr.set_editor_property("r", 1.0); mel.connect_material_property(cr, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    cs = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -200, 320)
+    cs.set_editor_property("r", 0.0); mel.connect_material_property(cs, "", unreal.MaterialProperty.MP_SPECULAR)
+    mel.recompile_material(mat)
+    return mat
+
+
 def _spawn_mesh(unreal, actors_sys, mat, mesh_path, location_cm, scale, rgb):
-    """Spawn a basic-shape mesh with a per-object coloured instance of `mat`."""
+    """Spawn a basic-shape mesh with an instance of `mat`. Sets the "Color" param
+    if the material has one (objects); the procedural platform material has none,
+    so set_material still runs regardless."""
     mesh = unreal.load_asset(mesh_path)
     actor = actors_sys.spawn_actor_from_object(mesh, unreal.Vector(*location_cm),
                                                unreal.Rotator(0, 0, 0))
@@ -110,9 +138,8 @@ def _spawn_mesh(unreal, actors_sys, mat, mesh_path, location_cm, scale, rgb):
     comp.set_world_scale3d(unreal.Vector(*scale))
     try:
         mid = unreal.MaterialLibrary.create_dynamic_material_instance(actor, mat)
-        mid.set_vector_parameter_value("Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-        try:  # BasicShapeMaterial (textured platform) -> force matte
-            mid.set_scalar_parameter_value("Roughness", 1.0)
+        try:
+            mid.set_vector_parameter_value("Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
         except Exception:
             pass
         comp.set_material(0, mid)
@@ -133,6 +160,7 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
+    plat_mat = ensure_platform_material(unreal)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
@@ -160,9 +188,7 @@ def spawn_scene(unreal):
     pmin, pmax = PLATFORM["min"], PLATFORM["max"]
     size = [(pmax[i] - pmin[i]) / 100.0 for i in range(3)]
     center = [(pmax[i] + pmin[i]) / 2.0 for i in range(3)]
-    # platform uses the matte material too (BasicShapeMaterial's specular is not
-    # zeroable and its view-dependent highlights blow up the held-out gap).
-    spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH, center, size, PLATFORM["color"]))
+    spawned.append(_spawn_mesh(unreal, actors_sys, plat_mat, _CUBE_MESH, center, size, PLATFORM["color"]))
 
     for o in OBJECTS:
         if o["shape"] == "sphere":
