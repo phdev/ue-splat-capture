@@ -190,8 +190,11 @@ def spawn_scene(unreal):
     n = 4
     ext = PLATFORM["max"][0]              # 150 cm half-extent
     tile = 2 * ext / n                    # 75 cm
-    palette = [[0.78, 0.80, 0.83], [0.30, 0.36, 0.46], [0.72, 0.58, 0.40],
-               [0.40, 0.55, 0.45], [0.55, 0.45, 0.60], [0.80, 0.75, 0.50]]
+    # bright, saturated, distinct colours -> strong features that survive
+    # exposure (muted/dark tiles gave weak features -> underfit).
+    palette = [[0.85, 0.25, 0.20], [0.20, 0.45, 0.85], [0.95, 0.80, 0.20],
+               [0.30, 0.70, 0.40], [0.60, 0.40, 0.80], [0.90, 0.55, 0.20],
+               [0.20, 0.70, 0.70], [0.85, 0.85, 0.88]]
     for i in range(n):
         for j in range(n):
             cx = -ext + tile * (i + 0.5)
