@@ -160,7 +160,6 @@ def spawn_scene(unreal):
     actors_sys = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     mat = ensure_color_material(unreal)
     bg_mat = ensure_bg_material(unreal)
-    plat_mat = ensure_platform_material(unreal)
     spawned = []
 
     # lights: strong top key + 4 side fills + weak bottom fill
@@ -184,11 +183,23 @@ def spawn_scene(unreal):
     except Exception as e:  # pragma: no cover
         unreal.log_warning(f"dome material: {e}")
 
-    # platform: scale the 100cm cube to the platform extents
-    pmin, pmax = PLATFORM["min"], PLATFORM["max"]
-    size = [(pmax[i] - pmin[i]) / 100.0 for i in range(3)]
-    center = [(pmax[i] + pmin[i]) / 2.0 for i in range(3)]
-    spawned.append(_spawn_mesh(unreal, actors_sys, plat_mat, _CUBE_MESH, center, size, PLATFORM["color"]))
+    # platform as a grid of flat-MATTE coloured tiles: strong colour-boundary
+    # features (so the splat locks the plane's geometry) with ZERO specular
+    # (view-independent -> generalises to held-out views). A single textured tile
+    # either underfits (flat) or has un-zeroable specular (BasicShapeMaterial).
+    n = 4
+    ext = PLATFORM["max"][0]              # 150 cm half-extent
+    tile = 2 * ext / n                    # 75 cm
+    palette = [[0.78, 0.80, 0.83], [0.30, 0.36, 0.46], [0.72, 0.58, 0.40],
+               [0.40, 0.55, 0.45], [0.55, 0.45, 0.60], [0.80, 0.75, 0.50]]
+    for i in range(n):
+        for j in range(n):
+            cx = -ext + tile * (i + 0.5)
+            cy = -ext + tile * (j + 0.5)
+            col = palette[(i * 3 + j * 2 + i * j) % len(palette)]
+            spawned.append(_spawn_mesh(unreal, actors_sys, mat, _CUBE_MESH,
+                                       [cx, cy, -6.0],
+                                       [tile / 100.0, tile / 100.0, 0.12], col))
 
     for o in OBJECTS:
         if o["shape"] == "sphere":
