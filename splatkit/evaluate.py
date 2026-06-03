@@ -19,7 +19,7 @@ def evaluate(model, frames, bg, save_dir: str | None = None) -> dict:
     if save_dir:
         Path(save_dir).mkdir(parents=True, exist_ok=True)
     for f in frames:
-        pred = gsmodel.render(model, f, bg).clamp(0, 1)
+        pred = gsmodel.render_auto(model, f, bg).clamp(0, 1)
         gt = f["image"]
         p = metrics.psnr(pred, gt)
         s = float(metrics.ssim(pred, gt))

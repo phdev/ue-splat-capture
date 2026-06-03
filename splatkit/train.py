@@ -78,7 +78,7 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
 
     if verbose:
         with torch.no_grad():
-            p0 = np.mean([metrics.psnr(gsmodel.render(model, f, bg).clamp(0, 1),
+            p0 = np.mean([metrics.psnr(gsmodel.render_auto(model, f, bg).clamp(0, 1),
                                        f["image"]) for f in held_f])
         print(f"  init heldout PSNR {p0:.2f} dB ({model.n} gaussians)", flush=True)
 
@@ -96,7 +96,7 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
         fi = order.pop()
         cam = train_f[fi]
         opt.zero_grad(set_to_none=True)
-        pred = gsmodel.render(model, cam, bg)
+        pred = gsmodel.render_auto(model, cam, bg)
         gt = cam["image"]
         l1 = torch.abs(pred - gt).mean()
         dssim = 1.0 - metrics.ssim(pred, gt)

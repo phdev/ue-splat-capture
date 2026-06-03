@@ -70,8 +70,28 @@ Always invoke via `uv run` (Makefile does). Set `PYTORCH_ENABLE_MPS_FALLBACK=1`
   tier_t3 --sh-degree 1 --iters 3500`. Keep default blur 0.12, lambda_ssim 0.2.
 - **Buffered output:** when running training to a file, use `python -u` and do
   NOT pipe through `tail` (tail only flushes at EOF — you'll see nothing live).
-- Training is slow-ish on MPS (full-image O(N·P) rasteriser, no tiling). 96×96
-  fixtures keep it tractable. Don't run two MPS jobs at once (they contend).
+- Training is slow-ish on MPS. 96×96 fixtures keep it tractable. Don't run two
+  MPS jobs at once (they contend -- a concurrent job inflates per-iter time
+  several-fold and can look like the renderer's fault; verify in isolation).
+- **Tiled rasterizer (`render_tiled`, opt-in via `SPLAT_TILED=1`).** There are
+  two rasterizers: the default GLOBAL one (`render`, evaluates every gaussian
+  against every pixel) and a tile-based one (`render_tiled`, bins gaussians into
+  screen tiles + composites each tile independently). `render_auto` dispatches;
+  **default is GLOBAL.** Measured reality (don't re-litigate): at the 96×96 gate
+  the tiled path is a NET LOSS end-to-end -- 1.5x SLOWER and -0.35 dB (clean
+  `train()` A/B, 400 iters) -- because its backward over the padded
+  (tiles x max_per_tile x tile_px) tensor outweighs the savings when there are
+  only ~9k pixels. Forward-only benchmarks MISLEAD (they show tiled "winning" at
+  96px); always measure fwd+bwd end-to-end. Where tiled IS the only option: HIGH
+  resolution -- the global renderer's O(M*pixels) tensor OOMs (~40 GB at 288px,
+  hard-OOM by 384px) while tiled stays bounded and its parity vs global actually
+  improves with resolution (42 dB @96px -> 71 dB @192px). Gotcha: `MAX_PER_TILE`
+  (default 2048, env `SPLAT_MAX_PER_TILE`) is a SAFETY ceiling, not a routine
+  cap; densification piles 1000+ gaussians into one tile, and a low value (e.g.
+  384) silently DROPS the farthest ones there -> parity craters to 27 dB. Parity
+  is guarded by `tests/test_gsmodel.py::test_tiled_*`. So: high-res training is
+  the real quality lever and `render_tiled` is its enabler, but it does NOT
+  improve the 96px result -- leave it off there.
 
 ## UE 5.7 capture — validated live on this machine
 A real headless capture was run: `UnrealEditor-Cmd <proj> -ExecutePythonScript=…
