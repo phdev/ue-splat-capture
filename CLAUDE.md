@@ -203,3 +203,16 @@ Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
 tolerance (`_TOL` in `verify.py`). Re-run on a clean checkout reproduces pass/fail
 and metrics within margin.
+
+## Web viewer: SOG on GitHub Pages
+`scripts/make_sog_viewer.sh <ply> <site_dir>` -> `npx @playcanvas/splat-transform`
+compresses the 3DGS .ply to a **SOG** ("WebP of splats", ~16x smaller, full SH kept)
+and emits a self-contained **SuperSplat/PlayCanvas HTML viewer** (`-U` unbundled:
+index.html + index.sog + index.js + settings.json). Host the folder on GitHub Pages
+(static files). Live: https://phdev.github.io/electric-dreams-splat/ (from
+out/brush_ed_final/ed_dense_15000.ply, 450MB -> 28MB SOG). Notes: the viewer needs
+HTTP (not file://) and WebGPU/WebGL (renders on real devices, NOT in headless
+Chromium -- `requestAdapter` returns nothing). True multi-chunk streamed LOD
+(`lod-meta.json`) needs an LOD pyramid (decimated levels tagged `-l 0/1/2`, merged)
+or SuperSplat's export dialog -- overkill below ~5M gaussians (a single SOG streams
+fine). Publish steps are in the script header.
