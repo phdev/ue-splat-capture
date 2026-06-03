@@ -185,10 +185,16 @@ COLMAP registered 91 views):
   3DGS trainer, native on Apple Silicon. `brush <colmap_dir> --total-train-iters 15000
   --eval-split-every 8 --eval-save-to-disk --export-every 5000 --export-path <dir>
   --export-name <name>`. Comparable quality, fully local, ~12 min. CAVEATS: cap
-  `--max-splats` or it pressures unified RAM and can exit early (~14k/15k on the canyon
-  capture); thin single-orbit coverage -> floaters on novel views (fix with a denser
-  capture). Reads the pod's COLMAP dir directly, or feed UE poses as a transforms.json
-  (skip COLMAP) after an OpenCV->OpenGL axis flip.
+  `--max-splats 2e6` or it pressures unified RAM and exits early (~14k/15k).
+- **FULLY-LOCAL path (VALIDATED, no COLMAP, no cloud):** capture -> `splatkit.ingest`
+  -> `scripts/ue_to_brush.py <ds> <out> gl` (recenter + OpenCV->OpenGL flip) -> `brush
+  <out> --total-train-iters 15000 --eval-split-every 8 --eval-save-to-disk --max-splats
+  2000000`. The **gl** flip is correct (render-vs-GT PSNR gl 12.78 vs cv 7.52 @4k). We
+  feed brush the EXACT UE poses and SKIP COLMAP -- the brew COLMAP 4.0.4 matcher
+  SIGABRT-crashes on this Mac (`--FeatureMatching.use_gpu 0`, the renamed 4.x flag,
+  doesn't help), and exact poses beat SfM-on-sky anyway. Capture at **EV=10** (8 blows,
+  12 crushes). "Option A" result: EV=10 dense 200-view orbit -> 19.5 dB held-out,
+  natural exposure + fewer floaters than the first 91-view run.
 **brush is the standing LOCAL real-3DGS trainer; Runpod is only faster.** View a .ply
 in SuperSplat (browser) or `brush <ply> --with-viewer`.
 
