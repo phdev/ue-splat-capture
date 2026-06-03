@@ -58,15 +58,16 @@ Always invoke via `uv run` (Makefile does). Set `PYTORCH_ENABLE_MPS_FALLBACK=1`
   per-training-view appearance instead of generalizing. (Synthetic, being
   view-independent, is unaffected: 33.0 @ deg0, 33.5 @ deg3.) Raise the degree
   only with many more views.
-- **UE capture now MEETS the bar.** Progression of held-out PSNR on the live UE
+- **UE capture PASSES ROBUSTLY.** Held-out PSNR/SSIM progression on the live UE
   capture: 13.3 (base-colour) -> 17.8 (lit) -> 22.4 (Lumen/AO off) -> 23.7
-  (supersample + fl) -> 26.4 (dense 120-cam rig) -> **28.58 dB / 0.854 SSIM**
-  (dense rig + SH degree 1 + 2500 iters) = PASS. The winning combo: the dense
-  rig gives held-out views close to training views AND enough views for SH
-  degree 1 to GENERALISE the platform's view-dependent specular (which overfit
-  at 54 views). Reproduce: `UE_PROJECT=... make capture` (dense rig) then
-  `python -m splatkit.tier_t3 --transforms <ds>/transforms.json --sh-degree 1
-  --iters 2500` (apply the ~0.989 UE fl calibration to the ingested intrinsics).
+  (supersample+fl) -> 26.4 (120-cam rig) -> 28.58/0.854 (120-cam + SH1 + 2500it)
+  -> **30.56 dB / 0.887 SSIM** (200-cam rig + SH1 + 3500it + 24k gaussians,
+  overfit gap 0.62, WORST view 27.9 dB). **VIEW COUNT was the decisive lever**:
+  more views lower the held-out gap, raise the worst views, and let SH degree 1
+  generalise the platform specular (SH overfits at <~100 views; SH degree 2-3
+  and blur<0.1 made it WORSE -- see run "A"). Winning recipe: `make capture`
+  (200-cam dense rig) -> ingest (apply ~0.989 UE fl calibration) -> `SPLAT_MAX_POINTS=24000
+  tier_t3 --sh-degree 1 --iters 3500`. Keep default blur 0.12, lambda_ssim 0.2.
 - **Buffered output:** when running training to a file, use `python -u` and do
   NOT pipe through `tail` (tail only flushes at EOF — you'll see nothing live).
 - Training is slow-ish on MPS (full-image O(N·P) rasteriser, no tiling). 96×96
