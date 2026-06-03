@@ -103,7 +103,7 @@ def main():
     fan_deg = float(os.environ.get("UE_FAN_DEG", "200"))
     pitches = [float(x) for x in os.environ.get("UE_PITCHES", "-28,-8,12").split(",")]
     caps = int(os.environ.get("UE_CAPS_PER_POSE", "3"))
-    ev = float(os.environ.get("UE_CAPTURE_EV", "12"))
+    ev = float(os.environ.get("UE_CAPTURE_EV", "10"))
     heldout_every = int(os.environ.get("UE_HELDOUT_EVERY", "8"))
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
 

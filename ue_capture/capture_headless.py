@@ -192,17 +192,81 @@ def _render(unreal, world, poses, comp, rt, actor, caps, out_dir):
     return frames
 
 
+def _principal_axis_xy(valids):
+    """Dominant horizontal direction of the loaded geometry (the canyon's length),
+    from the PCA of actor-bounds centers. No viewport headless, so this is how we
+    orient the corridor."""
+    import math
+    cs = [c for (_d, c, _h) in valids]
+    if len(cs) < 3:
+        return [1.0, 0.0, 0.0]
+    mx = sum(c[0] for c in cs) / len(cs); my = sum(c[1] for c in cs) / len(cs)
+    sxx = sxy = syy = 0.0
+    for c in cs:
+        dx = c[0] - mx; dy = c[1] - my
+        sxx += dx * dx; sxy += dx * dy; syy += dy * dy
+    tr = sxx + syy; det = sxx * syy - sxy * sxy
+    lam = tr / 2.0 + math.sqrt(max((tr / 2.0) ** 2 - det, 0.0))
+    v = [lam - syy, sxy] if abs(sxy) > 1e-6 else ([1.0, 0.0] if sxx >= syy else [0.0, 1.0])
+    n = math.hypot(v[0], v[1]) or 1.0
+    return [v[0] / n, v[1] / n, 0.0]
+
+
+def _canyon_poses(focus, valids, length_cm, n_fwd, n_lat, n_h, yaws, fan_deg, pitches, heldout_every):
+    """Grid of positions along the principal axis (capped to length_cm, centered on
+    focus), each with a yaw/pitch fan -- dense multi-position canyon coverage."""
+    import math
+    fwd_h = _principal_axis_xy(valids)
+    right_h = [fwd_h[1], -fwd_h[0], 0.0]
+    cs = [c for (_d, c, _h) in valids]
+    zs = sorted(c[2] for c in cs); zmid = zs[len(zs) // 2]
+    projl = [(c[0] - focus[0]) * right_h[0] + (c[1] - focus[1]) * right_h[1] for c in cs]
+    width = (max(projl) - min(projl)) if projl else length_cm * 0.4
+    step_fwd = length_cm / max(n_fwd - 1, 1)
+    step_lat = (min(width, length_cm) * 0.5) / max(n_lat - 1, 1)
+    step_h = max(width, length_cm) * 0.10
+    start = [focus[0] - fwd_h[0] * length_cm / 2.0, focus[1] - fwd_h[1] * length_cm / 2.0, zmid]
+    poses = []; idx = 0
+    for i in range(n_fwd):
+        for j in range(n_lat):
+            for k in range(n_h):
+                lat = (j - (n_lat - 1) / 2.0) * step_lat
+                pos = [start[0] + fwd_h[0] * (i * step_fwd) + right_h[0] * lat,
+                       start[1] + fwd_h[1] * (i * step_fwd) + right_h[1] * lat,
+                       start[2] + k * step_h]
+                for a_i in range(yaws):
+                    a = math.radians((-fan_deg / 2.0) + fan_deg * (a_i / max(yaws - 1, 1)))
+                    horiz = [math.cos(a) * fwd_h[c] + math.sin(a) * right_h[c] for c in range(3)]
+                    for p_deg in pitches:
+                        p = math.radians(p_deg)
+                        d = [math.cos(p) * horiz[0], math.cos(p) * horiz[1], math.sin(p)]
+                        tgt = [pos[c] + d[c] * 2000.0 for c in range(3)]
+                        split = "heldout" if (heldout_every and idx % heldout_every == 1) else "train"
+                        poses.append({"index": idx, "split": split, "location_cm": pos, "target_cm": tgt})
+                        idx += 1
+    return poses
+
+
 def main():
     import unreal
     out_dir = os.environ.get("UE_CAPTURE_OUT") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "electric_dreams")
     probe = os.environ.get("UE_PROBE", "0") == "1"
+    canyon = os.environ.get("UE_CANYON", "0") == "1"
     cap_res = int(os.environ.get("UE_CAP_RES", "512"))
-    train_res = int(os.environ.get("UE_TRAIN_RES", "128"))
-    hfov = float(os.environ.get("UE_HFOV", "70"))
+    train_res = int(os.environ.get("UE_TRAIN_RES", "512" if canyon else "128"))
+    hfov = float(os.environ.get("UE_HFOV", "75" if canyon else "70"))
     n_az = int(os.environ.get("UE_N_AZ", "28"))
-    caps = int(os.environ.get("UE_CAPS_PER_POSE", "4"))
-    ev = float(os.environ.get("UE_CAPTURE_EV", "1.0"))
+    caps = int(os.environ.get("UE_CAPS_PER_POSE", "3" if canyon else "4"))
+    ev = float(os.environ.get("UE_CAPTURE_EV", "10" if canyon else "1.0"))
+    cyn_len = float(os.environ.get("UE_CANYON_LEN_M", "50")) * 100.0
+    cyn = dict(n_fwd=int(os.environ.get("UE_FWD_STEPS", "5")),
+               n_lat=int(os.environ.get("UE_LAT_STEPS", "3")),
+               n_h=int(os.environ.get("UE_HEIGHT_STEPS", "1")),
+               yaws=int(os.environ.get("UE_YAWS", "6")),
+               fan_deg=float(os.environ.get("UE_FAN_DEG", "200")),
+               pitches=[float(x) for x in os.environ.get("UE_PITCHES", "-28,-8,12").split(",")],
+               heldout_every=int(os.environ.get("UE_HELDOUT_EVERY", "8")))
     os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
 
     unreal.log(f"[hl] loading level {LEVEL}")
@@ -221,7 +285,25 @@ def main():
 
     actor, comp, rt = _setup_capture(unreal, cap_res, hfov, ev)
 
-    if os.environ.get("UE_EXPO_SWEEP") == "1":
+    if canyon:
+        cposes = _canyon_poses(focus, valids, cyn_len, **cyn)
+        if probe:
+            sub = cposes[::max(1, len(cposes) // 12)][:12]
+            frames = _render(unreal, world, sub, comp, rt, actor, caps, out_dir)
+            print(f"CANYON_PROBE_DONE actors={na} sm={sm} ism={ism} frames={len(frames)} "
+                  f"planned={len(cposes)} len_m={cyn_len/100:.0f} out={out_dir}/images")
+        else:
+            unreal.log(f"[hl] canyon: {len(cposes)} cams over {cyn_len/100:.0f} m")
+            frames = _render(unreal, world, cposes, comp, rt, actor, caps, out_dir)
+            xs = [p['location_cm'][0] for p in cposes]; ys = [p['location_cm'][1] for p in cposes]
+            zs = [p['location_cm'][2] for p in cposes]; m = cyn_len * 0.35
+            export.write_ue_poses(os.path.join(out_dir, "ue_poses.json"), train_res, train_res, hfov,
+                                  frames, scene_meta={"background": [0.0, 0.0, 0.0],
+                                  "aabb_min_cm": [min(xs) - m, min(ys) - m, min(zs) - m],
+                                  "aabb_max_cm": [max(xs) + m, max(ys) + m, max(zs) + m],
+                                  "fiducials": [], "primitives": []})
+            print(f"WROTE {out_dir}/ue_poses.json ({len(frames)} canyon frames)")
+    elif os.environ.get("UE_EXPO_SWEEP") == "1":
         # one representative overview pose, rendered at a range of pinned
         # exposures (higher target = DARKER image) so we can pick the right EV.
         p = rig.orbit_hemisphere(focus, radius * 1.3, elevations_deg=(30.0,),
