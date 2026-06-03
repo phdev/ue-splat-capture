@@ -169,6 +169,29 @@ and the optimisation diverges (loss rises). **The capture (`transforms.json` +
 images) is the deliverable -- feed it to a real CUDA 3DGS trainer (Inria/gsplat/
 Nerfstudio).** Our in-repo trainer only handles small/simple hero regions.
 
+## Getting a real splat from a capture (VALIDATED -- cloud AND local)
+The CAPTURE is a standard 3DGS dataset; real trainers reconstruct it faithfully
+where ours can't. Both validated on the Electric Dreams capture (112 frames ->
+COLMAP registered 91 views):
+- **Cloud (fast): `scripts/pod_run_3dgs.sh`** on a Runpod CUDA pod. Provisions via
+  REST `POST https://rest.runpod.io/v1/pods` (image `runpod/pytorch:2.1.0-...cuda11.8`,
+  SSH key `~/.ssh/id_ed25519`, key gitignored at `~/.config/ue-splat-capture/runpod_api_key`;
+  proven request body in the quake repo's `runpod/create_capture_pod.mjs`). Script
+  apt-installs COLMAP, clones Inria 3DGS, COLMAP -> train -> render. Result: **27 dB,
+  92 MB .ply, ~15 min, ~$0.20**. GOTCHA: `pip install "numpy<2"` on the pod (torch 2.1
+  can't interop with numpy 2.x -> "Numpy is not available" in PILtoTorch). ALWAYS
+  `DELETE /v1/pods/<id>` when done.
+- **Local (free): `brush`** (`~/brush/target/release/brush`) -- a real wgpu/**Metal**
+  3DGS trainer, native on Apple Silicon. `brush <colmap_dir> --total-train-iters 15000
+  --eval-split-every 8 --eval-save-to-disk --export-every 5000 --export-path <dir>
+  --export-name <name>`. Comparable quality, fully local, ~12 min. CAVEATS: cap
+  `--max-splats` or it pressures unified RAM and can exit early (~14k/15k on the canyon
+  capture); thin single-orbit coverage -> floaters on novel views (fix with a denser
+  capture). Reads the pod's COLMAP dir directly, or feed UE poses as a transforms.json
+  (skip COLMAP) after an OpenCV->OpenGL axis flip.
+**brush is the standing LOCAL real-3DGS trainer; Runpod is only faster.** View a .ply
+in SuperSplat (browser) or `brush <ply> --with-viewer`.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
