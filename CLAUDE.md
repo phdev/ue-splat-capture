@@ -129,6 +129,46 @@ A real headless capture was run: `UnrealEditor-Cmd <proj> -ExecutePythonScript=�
   Drive it with `UE_PROJECT=… make capture` (or `UE_CAPTURE_OUT=… UnrealEditor-Cmd …
   -ExecutePythonScript=ue_capture/run_capture.py`).
 
+## Capturing an ARBITRARY UE level (not the self-test diorama)
+Two entry points capture any already-authored level into the same pipeline:
+- **Live editor** `ue_capture/capture_hero_orbit.py` -- run `py "<path>"` in the
+  OPEN editor's Python console. Reads the viewport camera, ray-traces to the hero
+  spot, orbits it, keeps the scene's real lighting. Best for World-Partition/PCG
+  scenes (geometry is already streamed/generated in memory; no re-stream needed).
+- **Headless** `ue_capture/capture_headless.py` via `scripts/capture_headless_run.sh`
+  (editor must be CLOSED -- it holds the project lock). Loads the level, streams WP
+  actors (`WorldPartitionBlueprintLibrary.get_actor_descs`/`load_actors`), auto-frames
+  from actor bounds (no viewport headless), orbits. `UE_PROBE=1` = load + report
+  geometry counts + a few overview frames FIRST (cheap validation); `UE_EXPO_SWEEP=1`
+  = render one pose at several exposures to pick `UE_CAPTURE_EV`.
+
+Gotchas (learned the hard way on Electric Dreams):
+- **A C++ game module must be REBUILT first** for headless: a project with `Source/`
+  (e.g. `ElectricDreamsSample`) aborts at boot with "game module could not be loaded"
+  because the GUI's Live-Coding-patched dylib on disk can't load in a fresh process.
+  Fix: `"$UE/Build/BatchFiles/Mac/Build.sh" <Target>Editor Mac Development
+  -project=<uproject>` then relaunch. (`<Target>` from `Binaries/Mac/*.target`.)
+- **Exposure is inverted from intuition**: a HIGHER pinned
+  `auto_exposure_min/max_brightness` = DARKER image. A bright daylight scene needs
+  ~8 (1.0 blows pure white); the diorama used 5. Sweep to choose.
+- **PCG foliage will NOT generate** in a blocking headless script (async needs engine
+  ticks a Python script never yields) -> expect bare terrain + hero meshes.
+- Non-destructive: one transient SceneCapture2D, deleted after; no global cvars.
+
+## Trainer scale limits (important, do not re-litigate)
+The trainer targets the ~1 m diorama and does NOT generalise to a large photoreal
+scene. Hardening added so it at least doesn't crash: `initpc._voxel_grid` caps
+per-axis resolution (`max_res=96`) so a big AABB doesn't explode to 100s of millions
+of voxels; `SPLAT_VAR_TOL` loosens the consistency variance gate for view-variant
+(Lumen) surfaces; `train.py` random-init auto-sizes init scale to the AABB;
+`scripts/normalize_ds.py` rescales a capture to ~2.5 m so the diorama-tuned LR/init
+apply. BUT even with all that, a 40 m photoreal capture (Electric Dreams,
+`out/electric_dreams_ds`) does NOT reconstruct: the sky is unmodellable by the
+single-background-colour compositor, the texture exceeds a few-thousand gaussians,
+and the optimisation diverges (loss rises). **The capture (`transforms.json` +
+images) is the deliverable -- feed it to a real CUDA 3DGS trainer (Inria/gsplat/
+Nerfstudio).** Our in-repo trainer only handles small/simple hero regions.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric

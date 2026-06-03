@@ -15,14 +15,20 @@ A silhouette `carve_point_cloud` is also provided for reference/testing.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 
-def _voxel_grid(aabb_min, aabb_max, approx_vox_m=0.045):
+def _voxel_grid(aabb_min, aabb_max, approx_vox_m=0.045, max_res=96):
     aabb_min = np.asarray(aabb_min, float)
     aabb_max = np.asarray(aabb_max, float)
     span = aabb_max - aabb_min
     res = np.maximum(np.round(span / approx_vox_m).astype(int) + 1, 2)
+    # Cap per-axis resolution so a LARGE capture (a ~40 m UE scene vs the ~1 m
+    # diorama) auto-coarsens instead of exploding to hundreds of millions of
+    # voxels. The diorama stays well under the cap, so it is unaffected.
+    res = np.minimum(res, max_res)
     # Inclusive grid: points land ON the AABB faces, crucially the ground plane
     # (z = aabb_min_z). A surface point reconstructs as photo-consistent; a point
     # floating just above it would see parallax and be rejected.
@@ -49,6 +55,9 @@ def consistency_point_cloud(frames, aabb_min, aabb_max, approx_vox_m=0.05,
                             var_tol=0.02, min_views=4, near=0.2,
                             max_points=9000, seed=0, background=None,
                             bg_reject_tol=0.06):
+    # A real UE scene has mild view-dependence (Lumen GI, faint speculars), so a
+    # looser tolerance keeps more surface than the diorama's strict 0.02.
+    var_tol = float(os.environ.get("SPLAT_VAR_TOL", var_tol))
     centers, res = _voxel_grid(aabb_min, aabb_max, approx_vox_m)
     V = centers.shape[0]
     n = np.zeros(V)

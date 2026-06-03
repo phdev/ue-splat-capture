@@ -70,10 +70,15 @@ def train(transforms_path: str, iters: int = 1500, n_gauss: int = 6000,
             pts, cols, init_scale=max(vox_m * 1.1, 0.03), device=device,
             init_opacity=0.7, sh_degree=sh_degree)
     else:
+        # init scale auto-sized to the scene (diorama ~1 m -> 0.06; a large UE
+        # capture ~40 m -> ~1 m) so random gaussians actually cover the volume.
+        ext = float(np.max(np.asarray(meta["aabb_max"], float)
+                           - np.asarray(meta["aabb_min"], float)))
         model = gsmodel.init_from_cameras(
             meta["aabb_min"], meta["aabb_max"], n_gauss,
             cams=train_f, gt_images=[f["image"] for f in train_f],
-            seed=seed, device=device, sh_degree=sh_degree)
+            seed=seed, device=device, sh_degree=sh_degree,
+            init_scale=max(0.06, ext / 40.0))
     opt = torch.optim.Adam(model.param_groups(lr), eps=1e-15)
 
     if verbose:
