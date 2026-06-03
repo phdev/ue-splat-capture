@@ -10,9 +10,9 @@ DB="$WORK/database.db"; rm -f "$DB"
 echo "[colmap] feature_extractor ($(ls "$IMG"/*.png | wc -l | tr -d ' ') imgs)"
 colmap feature_extractor --database_path "$DB" --image_path "$IMG" \
   --ImageReader.single_camera 1 --ImageReader.camera_model PINHOLE \
-  --SiftExtraction.use_gpu 0 >"$WORK/feat.log" 2>&1
+  --FeatureExtraction.use_gpu 0 >"$WORK/feat.log" 2>&1
 echo "[colmap] exhaustive_matcher (CPU; the slow step)"
-colmap exhaustive_matcher --database_path "$DB" --SiftMatching.use_gpu 0 >"$WORK/match.log" 2>&1
+colmap exhaustive_matcher --database_path "$DB" --FeatureMatching.use_gpu 0 >"$WORK/match.log" 2>&1
 echo "[colmap] mapper"
 colmap mapper --database_path "$DB" --image_path "$IMG" --output_path "$WORK/sparse" >"$WORK/map.log" 2>&1
 ln -sfn "$IMG" "$WORK/images"
