@@ -61,7 +61,9 @@ faint = op < op_floor
 rgb = np.clip(0.5 + 0.28209 * np.stack([arr['f_dc_0'], arr['f_dc_1'], arr['f_dc_2']], 1), 0, 1)
 mx, mn = rgb.max(1), rgb.min(1)
 sat = (mx - mn) / (mx + 1e-6)
-glint = ((sat > sat_thr) & (mx > val_thr)) | ((sat > 0.9) & (mx > 0.4))  # +pure-hue blobs (any hue)
+glint = (((sat > sat_thr) & (mx > val_thr))        # bright + saturated chromatic confetti
+         | ((sat > 0.9) & (mx > 0.4))               # +pure-hue blobs (any hue)
+         | ((sat < 0.22) & (mx > 0.82)))            # +bright near-white floaters (sky/highlight)
 keep &= ~(spike | haze | faint | glint)
 out = arr[keep]
 

@@ -142,6 +142,33 @@ Two entry points capture any already-authored level into the same pipeline:
   geometry counts + a few overview frames FIRST (cheap validation); `UE_EXPO_SWEEP=1`
   = render one pose at several exposures to pick `UE_CAPTURE_EV`.
 
+## Capture COVERAGE for a hero object (dome vs canyon) — fixes "missing gaps"
+A 3DGS reconstruction can ONLY have geometry where enough camera views saw the
+surface. Under-covered surfaces either don't reconstruct (black holes) or reconstruct
+faint+sparse (and then floater-cleaning strips them -> holes). **Match the rig to the
+subject:**
+- **`UE_CANYON=1`** = a flat grid of positions with shallow pitch fans along the
+  principal axis. Great for a corridor/canyon FLYTHROUGH; **wrong for a single hero
+  object** — it only sees it from near-level angles, so the object's TOP and BACK are
+  never captured. (The first Electric Dreams splat used this -> the spire's back was a
+  black void when you orbited to it. A flat capture's holes hide from a level-angle QA.)
+- **Orbit DOME** (default headless path) = `rig.orbit_hemisphere`: full 360deg azimuth
+  at each elevation ring. For a hero object set **`UE_ELEVATIONS`** (comma-deg, default
+  `8,22,38,55`) to a WIDE sweep e.g. `8,22,36,50,64,76` and **`UE_N_AZ=40`** -> 240 cams
+  covering sides through top. This FILLED the spire holes. Match intrinsics if you want
+  to merge datasets (`UE_HFOV`, `UE_CAP_RES`/`UE_TRAIN_RES`); ingest writes GLOBAL
+  intrinsics so different HFOVs can't share one transforms.json.
+- **QA from a full low-angle ORBIT, never 2 angles** (`scripts/orbit_poses.py` writes N
+  `?settings=poseK.json` files; loop the headed browser over them). Holes hide from the
+  hero angle. Render the OLD splat at the same poses to tell capture-gap from over-clean.
+- **Coverage changes the clean:** with complete coverage the real surface is dense+opaque
+  (high SOR-neighbour count, high opacity), so the SAME aggressive `despike_ply.py` that
+  HOLED an under-covered splat is now SAFE (floaters are still sparse/faint, surface is
+  not). Re-capture beat every cleaning knob. Dome result: 2M->582K, `scene6.sog` live.
+- Validated cmd: `UE_PROBE=0 UE_ELEVATIONS="8,22,36,50,64,76" UE_N_AZ=40 UE_HFOV=75
+  UE_CAP_RES=512 UE_TRAIN_RES=512 UE_ORBIT_RADIUS_CM=1800 UE_CAPTURE_EV=10
+  UE_CAPTURE_OUT=out/ed_dome scripts/capture_headless_run.sh` (close the GUI editor first).
+
 Gotchas (learned the hard way on Electric Dreams):
 - **A C++ game module must be REBUILT first** for headless: a project with `Source/`
   (e.g. `ElectricDreamsSample`) aborts at boot with "game module could not be loaded"

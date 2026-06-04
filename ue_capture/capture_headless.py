@@ -334,9 +334,10 @@ def main():
         print(f"PROBE_DONE actors={na} sm={sm} ism={ism} focus={focus} "
               f"radius_m={radius/100:.1f} frames={len(frames)} out={out_dir}/images")
     else:
-        poses = rig.orbit_hemisphere(focus, radius, elevations_deg=(8.0, 22.0, 38.0, 55.0),
+        elev = tuple(float(x) for x in os.environ.get("UE_ELEVATIONS", "8,22,38,55").split(","))
+        poses = rig.orbit_hemisphere(focus, radius, elevations_deg=elev,
                                      n_azimuth=n_az, heldout_every=6)
-        unreal.log(f"[hl] full orbit: {len(poses)} cams")
+        unreal.log(f"[hl] full orbit: {len(poses)} cams, elevations={elev}")
         frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir)
         ext = radius * 0.85
         ue_poses = os.path.join(out_dir, "ue_poses.json")
