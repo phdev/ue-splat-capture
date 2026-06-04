@@ -244,6 +244,18 @@ Chromium -- `requestAdapter` returns nothing). True multi-chunk streamed LOD
 or SuperSplat's export dialog -- overkill below ~5M gaussians (a single SOG streams
 fine). Publish steps are in the script header.
 
+**Cache-busting (the deployed `out/site/index.html`):** browsers + the GitHub Pages CDN
+cache the HTML and the multi-MB `.sog` aggressively — a new browser window can still
+show a stale splat. Two mechanisms: (1) bump the SOG filename each deploy (`scene5`->
+`scene6`...) and update the `fetch(...)` ref; (2) the viewer has a top-left **Reload**
+button that reloads with a fresh `?cb=<timestamp>`, and the SOG + settings fetches append
+it (`bust()` helper) so the new query string is a fresh cache key (browser + CDN miss).
+The loaded filename is shown next to the button (define it once as `const sogName` so the
+fetch + label can't drift). GOTCHA: the head `<script type="module">` is deferred, so any
+body script that reads `window.__sogName` must ALSO be `type="module"` (a plain body
+script runs first, before the head module sets it). Editing only index.html still needs
+one hard-refresh to pick up the new file (can't fix a cached file from inside itself).
+
 ## Floater cleaning: `scripts/despike_ply.py`
 brush splats of outdoor/edge scenes carry floater families that **survive** opacity,
 box, sphere, and connected-cluster filters. `despike_ply.py <in.ply> <out.ply>` strips
