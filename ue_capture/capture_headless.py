@@ -171,24 +171,40 @@ def _setup_capture(unreal, res, hfov, ev):
     return actor, comp, rt
 
 
-def _render(unreal, world, poses, comp, rt, actor, caps, out_dir):
+def _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples=1):
+    """Render each pose. When avg_samples>1, export N independent renders per pose
+    (cam_IDX_SS.png) -- Lumen GI / specular / TSR noise is re-randomised each render
+    and is what 3DGS turns into spiky foliage floaters; averaging the N samples
+    (scripts/average_samples.py, run after) denoises each training view. `caps`
+    renders after each camera move flush stale temporal history before sampling."""
     frames = []
     for i, p in enumerate(poses):
         loc = unreal.Vector(*p["location_cm"])
         rot = unreal.MathLibrary.find_look_at_rotation(loc, unreal.Vector(*p["target_cm"]))
         actor.set_actor_location_and_rotation(loc, rot, False, False)
-        for _ in range(caps):
+        for _ in range(caps):                       # warm-up after the camera move
             comp.capture_scene()
-        name = f"cam_{p['index']:03d}"
-        unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", name)
-        raw = os.path.join(out_dir, "images", name); png = raw + ".png"
-        if os.path.exists(raw) and not os.path.exists(png):
-            os.replace(raw, png)
+        base = f"cam_{p['index']:03d}"
+        if avg_samples > 1:
+            for s in range(avg_samples):
+                comp.capture_scene()                # one independent noisy sample
+                nm = f"{base}_{s:02d}"
+                unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", nm)
+                raw = os.path.join(out_dir, "images", nm)
+                if os.path.exists(raw) and not os.path.exists(raw + ".png"):
+                    os.replace(raw, raw + ".png")
+            png = os.path.join(out_dir, "images", base + ".png")   # produced by averaging
+        else:
+            comp.capture_scene()
+            unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", base)
+            raw = os.path.join(out_dir, "images", base); png = raw + ".png"
+            if os.path.exists(raw) and not os.path.exists(png):
+                os.replace(raw, png)
         frames.append({"file_path": png, "split": p["split"],
                        "location_cm": export.location_from_actor(unreal, actor),
                        "basis_ue": export.basis_from_actor(unreal, actor)})
         if (i + 1) % 20 == 0:
-            unreal.log(f"[hl] rendered {i+1}/{len(poses)}")
+            unreal.log(f"[hl] rendered {i+1}/{len(poses)} ({avg_samples}x samples)")
     return frames
 
 
@@ -258,6 +274,7 @@ def main():
     hfov = float(os.environ.get("UE_HFOV", "75" if canyon else "70"))
     n_az = int(os.environ.get("UE_N_AZ", "28"))
     caps = int(os.environ.get("UE_CAPS_PER_POSE", "3" if canyon else "4"))
+    avg_samples = int(os.environ.get("UE_AVG_SAMPLES", "1"))   # temporal denoise per pose
     ev = float(os.environ.get("UE_CAPTURE_EV", "10" if canyon else "1.0"))
     cyn_len = float(os.environ.get("UE_CANYON_LEN_M", "50")) * 100.0
     cyn = dict(n_fwd=int(os.environ.get("UE_FWD_STEPS", "5")),
@@ -284,6 +301,31 @@ def main():
                f"(static-mesh={sm}, instanced={ism})")
 
     actor, comp, rt = _setup_capture(unreal, cap_res, hfov, ev)
+
+    if os.environ.get("UE_DIAG") == "1":
+        # Stability probe: render ONE foliage-heavy pose N times back-to-back, export
+        # each. Diffing them reveals per-view instability (Lumen GI not converged /
+        # TSR noise / animated foliage) that 3DGS turns into spiky floaters.
+        diag_n = int(os.environ.get("UE_DIAG_N", "12"))
+        p = rig.orbit_hemisphere(focus, radius, elevations_deg=(14.0,), n_azimuth=1,
+                                 heldout_every=0)[0]
+        loc = unreal.Vector(*p["location_cm"])
+        rot = unreal.MathLibrary.find_look_at_rotation(loc, unreal.Vector(*p["target_cm"]))
+        actor.set_actor_location_and_rotation(loc, rot, False, False)
+        for i in range(diag_n):
+            comp.capture_scene()
+            name = f"diag_{i:03d}"
+            unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", name)
+            raw = os.path.join(out_dir, "images", name); png = raw + ".png"
+            if os.path.exists(raw) and not os.path.exists(png):
+                os.replace(raw, png)
+        unreal.log(f"[diag] wrote {diag_n} back-to-back renders of one pose")
+        print(f"DIAG_DONE n={diag_n} out={out_dir}/images")
+        try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(actor)
+        except Exception: pass
+        try: unreal.SystemLibrary.quit_editor()
+        except Exception: pass
+        return
 
     if canyon:
         cposes = _canyon_poses(focus, valids, cyn_len, **cyn)
@@ -337,8 +379,8 @@ def main():
         elev = tuple(float(x) for x in os.environ.get("UE_ELEVATIONS", "8,22,38,55").split(","))
         poses = rig.orbit_hemisphere(focus, radius, elevations_deg=elev,
                                      n_azimuth=n_az, heldout_every=6)
-        unreal.log(f"[hl] full orbit: {len(poses)} cams, elevations={elev}")
-        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir)
+        unreal.log(f"[hl] full orbit: {len(poses)} cams, elevations={elev}, avg_samples={avg_samples}")
+        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples)
         ext = radius * 0.85
         ue_poses = os.path.join(out_dir, "ue_poses.json")
         export.write_ue_poses(ue_poses, train_res, train_res, hfov, frames, scene_meta={

@@ -169,6 +169,30 @@ subject:**
   UE_CAP_RES=512 UE_TRAIN_RES=512 UE_ORBIT_RADIUS_CM=1800 UE_CAPTURE_EV=10
   UE_CAPTURE_OUT=out/ed_dome scripts/capture_headless_run.sh` (close the GUI editor first).
 
+## Capture STABILITY — the real cause of "spotty" foliage (temporal averaging)
+If a splat is **spiky/spotty on vegetation + wet surfaces but the static rock is clean**,
+it is almost certainly NOT thin-geometry or a cleaning problem — it is **per-view render
+noise**. `SceneCapture2D` does NOT temporally accumulate Lumen GI / specular / TSR the way
+the live viewport does, so each captured view has a *different* noise realisation on
+foliage and glossy/wet surfaces. 3DGS assumes every view agrees; when those pixels disagree
+view-to-view it cannot fit a surface and sprays **spiky floaters exactly there**.
+- **Diagnose it (`UE_DIAG=1 UE_DIAG_N=12`)**: renders ONE pose N times back-to-back. Diff
+  the frames: a *constant* (non-shrinking) frame-to-frame delta concentrated on foliage/
+  specular = stochastic noise (the static rock diffs to ~0). Measured here: per-pixel
+  temporal std mean ~0.8 but **p99 ~9 and max ~94 / 255** — all on vegetation + wet rock.
+- **Noise vs motion**: average the N samples and compare sharpness (laplacian variance) to
+  a single frame. ~unchanged (943→924) = stochastic NOISE (averaging denoises, no blur).
+  A big sharpness drop would mean real foliage MOTION (wind WPO) → then freeze wind/time
+  instead. Here it was noise.
+- **Fix = temporal averaging (`UE_AVG_SAMPLES=N`)**: `_render` exports N independent renders
+  per pose (`cam_IDX_SS.png`); `scripts/average_samples.py <imgs>` folds each group into one
+  clean `cam_IDX.png`. Noise falls ~1/sqrt(N): N=16 → ~25%. This is the lever that actually
+  removes foliage spottiness — re-capture beats every post-clean knob, AGAIN.
+- Validated cmd: add `UE_AVG_SAMPLES=16` to the dome capture (keep `UE_CAPS_PER_POSE=3` as a
+  warm-up flush after each camera move), then `python3 scripts/average_samples.py
+  out/<cap>/images` before ingest. ~16x the renders (still ~30 min at 1024px; renders are
+  ~0.37s each). Then ingest → ue_to_brush → brush as usual.
+
 Gotchas (learned the hard way on Electric Dreams):
 - **A C++ game module must be REBUILT first** for headless: a project with `Source/`
   (e.g. `ElectricDreamsSample`) aborts at boot with "game module could not be loaded"
