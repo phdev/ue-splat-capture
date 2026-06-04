@@ -193,6 +193,23 @@ view-to-view it cannot fit a surface and sprays **spiky floaters exactly there**
   out/<cap>/images` before ingest. ~16x the renders (still ~30 min at 1024px; renders are
   ~0.37s each). Then ingest → ue_to_brush → brush as usual.
 
+## TERRAIN gaps (ground reconstructs in patches) — add a ground-coverage pass
+A spire **dome** converges every camera on the hero -> the flat ground only appears at the
+bottom edge of frame at grazing angles -> it reconstructs in disconnected patches with gray
+gaps ("floating island"). Same coverage logic as the spire holes, pointed at the ground:
+add a **second pass that looks DOWN at the terrain**, then MERGE with the dome and train on
+the union. No code change — drive it with env: lower the focus to ground level + bigger
+radius + steeper-down rings:
+`UE_FOCUS_CM="<x>,<y>,<groundZ>" UE_ORBIT_RADIUS_CM=3000 UE_ELEVATIONS="28,44,60"
+UE_N_AZ=36 UE_AVG_SAMPLES=16` (same UE_HFOV/UE_CAP_RES as the dome so intrinsics match).
+- **Merge at the INGESTED level** (`scripts/merge_datasets.py <out> <ds0> <ds1>`): ingest
+  keeps WORLD coords (no recenter), so merging there and letting `ue_to_brush` recenter the
+  UNION once keeps the passes aligned. It asserts the global intrinsics match and prefixes
+  filenames (`d0_`,`d1_`) to avoid collisions. Then `ue_to_brush` on the merged dir → brush.
+- Sanity-check the ground frames first (some azimuths face shadow and come out dark — a few
+  are fine; if most are black, raise exposure / lower EV). Validated: dome 240 + ground 108
+  -> 348 views, merged + retrained to fill the terrain.
+
 Gotchas (learned the hard way on Electric Dreams):
 - **A C++ game module must be REBUILT first** for headless: a project with `Source/`
   (e.g. `ElectricDreamsSample`) aborts at boot with "game module could not be loaded"
