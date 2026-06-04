@@ -35,6 +35,36 @@ def orbit_hemisphere(center_cm, radius_cm, elevations_deg=(22.0, 48.0),
     return poses
 
 
+def grid_nadir(center_cm, extent_cm, height_cm, n_side=7, converge=0.25,
+               heldout_every=8, start_index=0):
+    """Drone-mapping grid for TERRAIN: n_side x n_side cameras spread over a
+    (2*extent_cm)^2 area, each at `height_cm` above the ground plane (center z)
+    looking ~straight DOWN at the patch beneath it. Unlike orbit_hemisphere (all
+    cameras converge on one hero point -> only the centre ground is covered), this
+    gives uniform overlapping coverage of the whole spread ground. `converge`
+    (0..1) tilts each camera that fraction toward the centre for some angular
+    diversity (0 = pure nadir). Heavy overlap (spacing < footprint) gives the
+    stereo baseline 3DGS needs for depth on flat ground."""
+    cx, cy, cz = center_cm
+    poses = []
+    idx = start_index
+    n = max(2, n_side)
+    for i in range(n):
+        for j in range(n):
+            x = cx + (i / (n - 1) - 0.5) * 2.0 * extent_cm
+            y = cy + (j / (n - 1) - 0.5) * 2.0 * extent_cm
+            z = cz + height_cm
+            # target: straight below (nadir), nudged toward centre by `converge`
+            tgt = [x + (cx - x) * converge, y + (cy - y) * converge, cz]
+            split = "heldout" if (heldout_every and idx % heldout_every == 1) else "train"
+            poses.append({
+                "index": idx, "kind": "grid", "split": split,
+                "grid_ij": [i, j], "location_cm": [x, y, z], "target_cm": tgt,
+            })
+            idx += 1
+    return poses
+
+
 def interior_walk(waypoints_cm, n_steps=8, height_cm=130.0, look_ahead=0.12,
                   start_index=0):
     """Cameras walking a closed polyline at fixed height, looking ahead."""

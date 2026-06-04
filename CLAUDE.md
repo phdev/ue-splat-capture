@@ -209,6 +209,15 @@ UE_N_AZ=36 UE_AVG_SAMPLES=16` (same UE_HFOV/UE_CAP_RES as the dome so intrinsics
 - Sanity-check the ground frames first (some azimuths face shadow and come out dark — a few
   are fine; if most are black, raise exposure / lower EV). Validated: dome 240 + ground 108
   -> 348 views, merged + retrained to fill the terrain.
+- **For the SPREAD ground (a converging ground-dome only covers the centre), use a NADIR
+  GRID** (`UE_GRID=1`, `rig.grid_nadir`): NxN cameras spread over the terrain (`UE_GRID_N`,
+  `UE_GRID_EXTENT_M`), each at `UE_GRID_HEIGHT_M` above the ground looking ~straight DOWN at
+  the patch beneath it (`UE_GRID_CONVERGE` 0..1 tilts toward centre for angular diversity) —
+  drone-mapping style, uniform overlapping coverage. Pin `UE_FOCUS_CM` to the GROUND level.
+  Keep height/spacing so footprint (2*h*tan(hfov/2)) >> grid spacing (heavy overlap = the
+  stereo baseline 3DGS needs on flat ground). Merge it as a 3rd pass with the dome + ground
+  dome. NOTE: truly flat featureless ground stays hard for 3DGS (few features to triangulate)
+  even with coverage — coverage closes the big gaps, not every last hole.
 
 Gotchas (learned the hard way on Electric Dreams):
 - **A C++ game module must be REBUILT first** for headless: a project with `Source/`

@@ -327,6 +327,31 @@ def main():
         except Exception: pass
         return
 
+    if os.environ.get("UE_GRID") == "1":
+        # Drone-mapping nadir grid for TERRAIN: uniform down-looking coverage of the
+        # spread ground (a converging dome only covers the centre). Merge with the
+        # spire dome afterwards. Pin UE_FOCUS_CM to the GROUND centre/level.
+        gn = int(os.environ.get("UE_GRID_N", "7"))
+        gext = float(os.environ.get("UE_GRID_EXTENT_M", "24")) * 100.0
+        ght = float(os.environ.get("UE_GRID_HEIGHT_M", "16")) * 100.0
+        gconv = float(os.environ.get("UE_GRID_CONVERGE", "0.25"))
+        gposes = rig.grid_nadir(focus, gext, ght, n_side=gn, converge=gconv, heldout_every=8)
+        unreal.log(f"[hl] terrain grid: {len(gposes)} cams ({gn}x{gn}), extent {gext/100:.0f}m, "
+                   f"height {ght/100:.0f}m, converge {gconv}, avg_samples={avg_samples}")
+        frames = _render(unreal, world, gposes, comp, rt, actor, caps, out_dir, avg_samples)
+        m = gext * 1.2
+        export.write_ue_poses(os.path.join(out_dir, "ue_poses.json"), train_res, train_res, hfov,
+                              frames, scene_meta={"background": [0.0, 0.0, 0.0],
+                              "aabb_min_cm": [focus[0]-m, focus[1]-m, focus[2]-ght],
+                              "aabb_max_cm": [focus[0]+m, focus[1]+m, focus[2]+ght],
+                              "fiducials": [], "primitives": []})
+        print(f"WROTE {out_dir}/ue_poses.json ({len(frames)} grid frames, focus {focus})")
+        try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(actor)
+        except Exception: pass
+        try: unreal.SystemLibrary.quit_editor()
+        except Exception: pass
+        return
+
     if canyon:
         cposes = _canyon_poses(focus, valids, cyn_len, **cyn)
         if probe:
