@@ -16,3 +16,4 @@ out/
 # frozen baseline; per-run tier JSONs are ignored.
 results/*.json
 !results/baseline.json
+.gstack/

@@ -216,3 +216,49 @@ Chromium -- `requestAdapter` returns nothing). True multi-chunk streamed LOD
 (`lod-meta.json`) needs an LOD pyramid (decimated levels tagged `-l 0/1/2`, merged)
 or SuperSplat's export dialog -- overkill below ~5M gaussians (a single SOG streams
 fine). Publish steps are in the script header.
+
+## Floater cleaning: `scripts/despike_ply.py`
+brush splats of outdoor/edge scenes carry floater families that **survive** opacity,
+box, sphere, and connected-cluster filters. `despike_ply.py <in.ply> <out.ply>` strips
+them in one pass (all columns preserved, so downstream splat-transform still works).
+**Critical gotchas:** in the raw .ply, **scales are LOG-space** (`exp()` to get meters)
+and **opacity is a LOGIT** (`sigmoid()` to get [0,1]); splat-transform's `-V`/`-m` use
+the activated values, Python must convert. Six filters, each targeting one artifact:
+- **spikes** — long thin needles (longest axis big in abs terms AND >Nx the 2nd axis).
+  Render as bright chromatic slivers. Per-axis scale caps miss them; the discriminator
+  is **aspect ratio** `s2/s1` (median is already ~4.5, so gate on abs length too).
+- **haze** — big AND faint blobs (milky fog). Big gaussians here are ~universally faint
+  (s2>0.5m -> median opacity 0.029), so big+faint cleanly separates from real surfaces.
+- **faint** — global opacity floor.
+- **glint** — bright AND color-saturated chromatic confetti, plus a pure-hue clause
+  (`sat>0.9`) for moderate-bright pure R/G/B blobs. NOTE: this is a *stylized* scene
+  (~25% of gaussians have sat>0.7), so saturation-only filtering destroys real color —
+  must gate on brightness.
+- **SOR** — statistical outlier removal (mean dist to K-NN > thresh). Kills the diffuse
+  confetti *shell* (sparse) while sparing the dense rock surface (~0.1m neighbor spacing).
+  scipy cKDTree, ~1s for 800K pts. **This was the single biggest win.**
+- **CC** — keep largest connected component (voxel-label at `cc_vox` m). The object is
+  ONE big blob (~95%); detached bright clusters / dark specks / colored blobs are many
+  tiny components. Use this **instead of** splat-transform `-D` (whose op=0.8 wrongly
+  fragments the main mass and deletes real connected terrain).
+
+Validated recipe (Electric Dreams hero rock, 2M -> 542K gaussians, 6.4MB SOG, deployed):
+```
+python3 scripts/despike_ply.py IN.ply /tmp/clean.ply 0.25 6 0.4 0.3 0.06 \
+        -45,-45,-22,50,46,8 0.6 0.5 0.2 16 1.0
+python3 scripts/set_viewer_camera.py /tmp/clean.ply SITE/settings.json   # fit cam to content
+npx -y @playcanvas/splat-transform /tmp/clean.ply -N -G 0.15,0.15,0.02 -H 0 -r -90,0,0 SITE/sceneN.sog -w
+```
+Residual hard cases: moss-colored green blobs (moderate sat ~0.45, connected) read as
+real moss — at the edge of separability, left in. `set_viewer_camera.py` refits the
+SuperSplat camera to the cleaned content (the viewer auto-focuses on content bounds, so
+the camera must track each crop). Bump the SOG filename (sceneN) to bust the Pages cache.
+
+## Self-QA: render the viewer on the Mac GPU (headed browse)
+The SOG viewer needs a real GPU — **headless** Chromium has no WebGPU adapter (blank
+canvas). Use `/browse` **headed** so it renders on Metal, then screenshot + Read to
+visually QA each candidate: `$B --headed goto URL && $B --headed wait --networkidle &&
+$B --headed screenshot /tmp/x.png`. Pass `--headed` to EVERY command (mixed configs
+error). Serve candidates locally (`python3 -m http.server`) and switch splats via
+`?content=sceneX.sog` (index.html uses `fetch(contentUrl)`). QA from front AND opposite
+side to catch floater farms hidden behind the hero angle.
