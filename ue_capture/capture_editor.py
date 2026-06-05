@@ -143,13 +143,19 @@ def main():
         else [89287.5, -5187.4, 1849.0]
     radius = float(os.environ.get("UE_ORBIT_RADIUS_CM", "1800"))
 
-    # nudge World Partition + PCG to populate (the GUI editor ticks will finish it)
+    # nudge World Partition + PCG to populate (the GUI editor ticks will finish it).
+    # Use get_actor_descs() (the headless-proven API; get_actor_descriptor_instances
+    # doesn't exist) -> load all descriptors so the capture region is streamed in.
     try:
+        res = unreal.WorldPartitionBlueprintLibrary.get_actor_descs()
+        descs = res[1] if isinstance(res, (tuple, list)) else res
         guids = []
-        for d in (unreal.WorldPartitionBlueprintLibrary.get_actor_descriptor_instances(world) or []):
+        for d in (descs or []):
             try: guids.append(d.get_editor_property("guid"))
             except Exception: pass
-        if guids: unreal.WorldPartitionBlueprintLibrary.load_actors(guids)
+        if guids:
+            unreal.WorldPartitionBlueprintLibrary.load_actors(guids)
+            unreal.log(f"[ed] WP: loading {len(guids)} actor descriptors")
     except Exception as e:
         unreal.log_warning(f"[ed] WP load: {e}")
     try:
