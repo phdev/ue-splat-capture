@@ -25,6 +25,12 @@ SCALE_REG="${SCALE_REG:-0.01}"
 OPACITY_REG="${OPACITY_REG:-0.01}"
 NOISE_LR="${NOISE_LR:-5e5}"
 INIT_TYPE="${INIT_TYPE:-random}"         # MCMC works great from random; our points3D is a random cloud anyway
+RES="${RES:-}"                           # empty = don't pass -r (matches the proven 18.65 run; 1536<1600 is full-res anyway)
+DENSIFY_UNTIL="${DENSIFY_UNTIL:-}"       # empty = use train.py default (15000); only override if set
+# NOTE: do NOT lower scale_reg/opacity_reg below the 0.01 defaults — MCMC's noise injection
+# needs those reg terms to stay stable; halving them diverged the model (PSNR 18.6 -> 11).
+TEST_ITERS="${TEST_ITERS:-7000 15000 30000 $ITERS}"
+SAVE_ITERS="${SAVE_ITERS:-30000 $ITERS}"  # checkpoint intermediate too (grab early if it plateaus)
 log(){ echo "[$(date +%H:%M:%S)] $*"; }
 
 log "STAGE_CLONE"
@@ -44,9 +50,11 @@ REG=$(($(wc -l < ed/sparse/0/images.txt 2>/dev/null || echo 8)/2 - 2))
 log "DATASET imgs=$NIMG colmap_poses=$REG cap_max=$CAP_MAX init=$INIT_TYPE iters=$ITERS"
 [ "$NIMG" -gt 0 ] || { log NO_IMAGES; exit 1; }
 
-log "STAGE_TRAIN (MCMC: cap_max=$CAP_MAX scale_reg=$SCALE_REG opacity_reg=$OPACITY_REG noise_lr=$NOISE_LR)"
-python3 gs/train.py -s /workspace/ed -m /workspace/ed/output --eval --data_device cpu \
-  --iterations "$ITERS" --test_iterations 7000 15000 "$ITERS" --save_iterations "$ITERS" \
+RES_ARG=""; [ -n "$RES" ] && RES_ARG="-r $RES"
+DENS_ARG=""; [ -n "$DENSIFY_UNTIL" ] && DENS_ARG="--densify_until_iter $DENSIFY_UNTIL"
+log "STAGE_TRAIN (MCMC: cap_max=$CAP_MAX scale_reg=$SCALE_REG opacity_reg=$OPACITY_REG noise_lr=$NOISE_LR ${RES_ARG} ${DENS_ARG})"
+python3 gs/train.py -s /workspace/ed -m /workspace/ed/output --eval --data_device cpu $RES_ARG $DENS_ARG \
+  --iterations "$ITERS" --test_iterations $TEST_ITERS --save_iterations $SAVE_ITERS \
   --cap_max "$CAP_MAX" --scale_reg "$SCALE_REG" --opacity_reg "$OPACITY_REG" \
   --noise_lr "$NOISE_LR" --init_type "$INIT_TYPE" >train.log 2>&1 \
   || { log TRAIN_FAIL; tail -60 train.log; exit 1; }

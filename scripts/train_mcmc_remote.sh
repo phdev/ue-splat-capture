@@ -24,10 +24,16 @@ SCP scripts/pod_run_3dgs_mcmc.sh root@"$IP":/workspace/
 "${SSH[@]}" 'cd /workspace && tar --no-same-owner -xzf ed_mcmc.tar.gz && ls ed && echo IMGS=$(ls ed/images|wc -l)'
 
 echo "=== launch training (nohup; survives ssh drop) ==="
-"${SSH[@]}" "cd /workspace && CAP_MAX=$CAP_MAX ITERS=$ITERS nohup bash pod_run_3dgs_mcmc.sh > run.log 2>&1 & echo STARTED pid \$!"
+# forward extra tunables only if set in the caller env (SCALE_REG/OPACITY_REG/DENSIFY_UNTIL/RES/TEST_ITERS)
+ENVS="CAP_MAX=$CAP_MAX ITERS=$ITERS"
+for v in SCALE_REG OPACITY_REG NOISE_LR DENSIFY_UNTIL RES; do
+  eval "val=\${$v:-}"; [ -n "$val" ] && ENVS="$ENVS $v=$val"
+done
+echo "remote env: $ENVS"
+"${SSH[@]}" "cd /workspace && $ENVS nohup bash pod_run_3dgs_mcmc.sh > run.log 2>&1 & echo STARTED pid \$!"
 
 echo "=== poll run.log until ALL_DONE / FAIL ==="
-for i in {1..240}; do            # up to ~80 min (20s * 240)
+for i in {1..1080}; do           # up to ~6 h (20s * 1080) — big cap_max runs are slow
   sleep 20
   line=$("${SSH[@]}" 'tail -1 /workspace/run.log' 2>/dev/null || true)
   echo "[$i] $line"
