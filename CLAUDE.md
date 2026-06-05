@@ -286,6 +286,31 @@ backend (burn op unimplemented — leave it 0); standalone 2DGS/Mip-Splatting Gi
 are CUDA-only. brush also has an intermittent cubecl `unwrap()` GPU panic mid-train — a
 late checkpoint (metrics plateau ~22k) is fine. Live `scene11.sog` used this.
 
+## TERRAIN cohesion (patchy fuzz -> surfaces) — 2D Gaussian Splatting on Runpod
+3DGS (brush) makes free-floating BLOBS with no surface constraint -> ground is fuzzy/
+patchy. **2DGS** makes flat SURFELS that lie on surfaces -> cohesive connected terrain.
+2DGS is CUDA-only (no Mac) -> Runpod. Pipeline (the long, hard one):
+- **Provision:** `runpod/create_capture_pod.mjs` request body in the quake repo is the proven
+  template — `POST /v1/pods` (image `runpod/pytorch:2.1.0-...cuda11.8`, gpuTypeIds list,
+  `env.PUBLIC_KEY`=`~/.ssh/id_ed25519.pub`, ports `22/tcp`). Poll `GET /v1/pods/<id>` for
+  `publicIp`+`portMappings["22"]`. SSH/scp with `~/.ssh/id_ed25519`. **DELETE /v1/pods/<id>**
+  when done. SSH GOTCHAS: (1) **zsh doesn't word-split `$OPTS`** — inline the ssh flags;
+  (2) long foreground SSH commands drop (255) — use `nohup bash <script-file> >log 2>&1 &`
+  then poll the log (the `setsid bash -c '...'` inline form silently failed); (3) macOS tar
+  -> extract with `--no-same-owner`, `COPYFILE_DISABLE=1 tar --no-xattrs` to avoid `._*`.
+- **SKIP COLMAP** (412-img exhaustive CPU matching ~12 h; GPU SIFT crashes headless — Qt
+  needs `QT_QPA_PLATFORM=offscreen`, and `--no_gpu`). Instead feed EXACT poses:
+  `scripts/transforms_to_colmap.py out/ed_full_ds/transforms.json <sparse/0>` writes
+  cameras/images/points3D.txt (auto-detects OpenCV vs OpenGL via fwd·to_focus dot; random
+  init cloud). VALIDATE with a 500-1000 iter run (`-r 2`, PSNR must climb) BEFORE the 30k.
+- **Train:** `python3 -u gs/train.py -s ed -m ed/output -r 1 --data_device cpu
+  --iterations 30000 --lambda_dist 100` (hbb1/2d-gaussian-splatting; needs matplotlib).
+  2DGS ply = **2 scales + normals**; `scripts/twodgs_to_3dgs.py` adds a thin scale_2 (flat
+  disk) + drops normals for the viewer. The 2DGS splat is in OpenCV WORLD coords (offset
+  ~892m) -> RECENTER by median before the box-crop clean; clean GENTLY (surfels are flat by
+  design). Result: PSNR 21.95, cohesive terrain. Live `scene13.sog`. `scripts/pod_run_2dgs.sh`
+  is the COLMAP-on-pod variant (kept but slow); exact-poses is the fast path.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
