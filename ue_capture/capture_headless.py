@@ -141,12 +141,16 @@ def _count_geometry(unreal):
     return len(actors), sm, ism
 
 
-def _setup_capture(unreal, res, hfov, ev):
+def _setup_capture(unreal, res, hfov, ev, depth=False):
     actor = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).spawn_actor_from_class(
         unreal.SceneCapture2D, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
     comp = actor.capture_component2d
     comp.fov_angle = hfov
-    comp.capture_source = unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR
+    # depth: SCS_SCENE_DEPTH writes per-pixel linear depth (UE cm) -> needs a FLOAT render
+    # target (export_render_target then writes EXR). Ground-truth depth for depth-supervised
+    # training. Else the normal lit LDR colour capture.
+    comp.capture_source = (unreal.SceneCaptureSource.SCS_SCENE_DEPTH if depth
+                           else unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
     for k, v in [("capture_every_frame", False), ("capture_on_movement", False),
                  ("always_persist_rendering_state", True)]:
         try: comp.set_editor_property(k, v)
@@ -165,8 +169,15 @@ def _setup_capture(unreal, res, hfov, ev):
             pp.set_editor_property(k, v)
         comp.set_editor_property("post_process_settings", pp)
     except Exception: pass
-    rt = unreal.RenderingLibrary.create_render_target2d(
-        actor, res, res, unreal.TextureRenderTargetFormat.RTF_RGBA8)
+    fmt = unreal.TextureRenderTargetFormat.RTF_RGBA8
+    if depth:                                          # need a FLOAT RT (enum name varies by UE ver)
+        for nm in ("RTF_R32f", "RTF_RGBA32f", "RTF_RGBA16f", "RTF_R16f", "RTF_RG16f",
+                   "RTF_R32F", "RTF_RGBA32F", "RTF_RGBA16F"):
+            if hasattr(unreal.TextureRenderTargetFormat, nm):
+                fmt = getattr(unreal.TextureRenderTargetFormat, nm)
+                unreal.log(f"[hl] depth RT format = {nm}")
+                break
+    rt = unreal.RenderingLibrary.create_render_target2d(actor, res, res, fmt)
     comp.texture_target = rt
     return actor, comp, rt
 
@@ -275,6 +286,9 @@ def main():
     n_az = int(os.environ.get("UE_N_AZ", "28"))
     caps = int(os.environ.get("UE_CAPS_PER_POSE", "3" if canyon else "4"))
     avg_samples = int(os.environ.get("UE_AVG_SAMPLES", "1"))   # temporal denoise per pose
+    depth = os.environ.get("UE_DEPTH") == "1"                  # capture ground-truth depth (EXR)
+    if depth:
+        avg_samples = 1                                        # depth is geometric, no denoise needed
     ev = float(os.environ.get("UE_CAPTURE_EV", "10" if canyon else "1.0"))
     cyn_len = float(os.environ.get("UE_CANYON_LEN_M", "50")) * 100.0
     cyn = dict(n_fwd=int(os.environ.get("UE_FWD_STEPS", "5")),
@@ -300,7 +314,7 @@ def main():
     unreal.log(f"[hl] focus={focus} radius={radius/100:.1f}m  loaded actors={na} "
                f"(static-mesh={sm}, instanced={ism})")
 
-    actor, comp, rt = _setup_capture(unreal, cap_res, hfov, ev)
+    actor, comp, rt = _setup_capture(unreal, cap_res, hfov, ev, depth=depth)
 
     if os.environ.get("UE_DIAG") == "1":
         # Stability probe: render ONE foliage-heavy pose N times back-to-back, export
