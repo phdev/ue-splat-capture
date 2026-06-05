@@ -155,10 +155,15 @@ def _setup_capture(unreal, res, hfov, ev, depth=False):
                  ("always_persist_rendering_state", True)]:
         try: comp.set_editor_property(k, v)
         except Exception: pass
+    flags = [_flag(unreal, "MotionBlur", False), _flag(unreal, "ScreenSpaceReflections", False),
+             _flag(unreal, "Bloom", False)]
+    if os.environ.get("UE_NOSKY") == "1":
+        # hide the visible sky so 3DGS doesn't waste capacity (and floaters) on it; keep
+        # the directional sun + skylight ambient so the terrain stays lit.
+        for nm in ("Atmosphere", "Fog", "VolumetricFog", "Cloud"):
+            flags.append(_flag(unreal, nm, False))
     try:
-        comp.set_editor_property("show_flag_settings", [
-            _flag(unreal, "MotionBlur", False), _flag(unreal, "ScreenSpaceReflections", False),
-            _flag(unreal, "Bloom", False)])
+        comp.set_editor_property("show_flag_settings", flags)
     except Exception: pass
     try:
         pp = comp.post_process_settings

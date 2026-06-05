@@ -311,6 +311,48 @@ patchy. **2DGS** makes flat SURFELS that lie on surfaces -> cohesive connected t
   design). Result: PSNR 21.95, cohesive terrain. Live `scene13.sog`. `scripts/pod_run_2dgs.sh`
   is the COLMAP-on-pod variant (kept but slow); exact-poses is the fast path.
 
+## Higher PSNR/SSIM: no-sky re-capture + 3DGS-MCMC (the scene15 pipeline)
+To push held-out metrics + kill sky floaters, re-capture with the SKY OFF and train
+**3DGS-MCMC** (ubc-vision/3dgs-mcmc — fixed gaussian budget + relocation, far fewer
+floaters than vanilla densify). One driver: `scripts/recapture_nosky.sh` runs all three
+passes (dome 240 + ground 108 + grid 64 = 412) at **1536px** with `UE_NOSKY=1` +
+`UE_AVG_SAMPLES=16`.
+- **`UE_NOSKY=1`** (in `_setup_capture`) disables the `Atmosphere/Fog/VolumetricFog/Cloud`
+  show flags but KEEPS the directional sun + skylight -> terrain stays lit, background is
+  pure black. No sky surfels for the trainer to waste capacity (or floaters) on. Probe it
+  first (a dome `UE_PROBE=1` + a `UE_GRID=1` nadir) — confirm black bg + lit rock.
+- **UE chdir's to its engine-binaries dir mid-startup**, so a RELATIVE `UE_CAPTURE_OUT`
+  lands captures OUTSIDE the repo (`/Users/Shared/Epic Games/UE_5.7/Engine/Binaries/Mac/out/`).
+  ALWAYS pass an ABSOLUTE `UE_CAPTURE_OUT` (recapture_nosky.sh prefixes `$PWD`). The prior
+  good passes' `ue_poses.json` already had absolute `file_path`s — that's the tell.
+- **Pipeline** `scripts/prep_mcmc_dataset.sh`: average_samples -> splatkit.ingest (per pass)
+  -> merge_datasets -> transforms_to_colmap -> flatten all imgs into `ed/images/` + `ed/sparse/0`
+  (COLMAP layout, no SfM). `--eval` then holds out every 8th (llffhold) for a comparable number.
+- **Pod** `scripts/runpod_pod.py {create,wait,status,delete}` (REST, key gitignored; prefers
+  48GB cards, **cuda11.8 image** — the MCMC diff-gaussian-rasterization fork is 3DGS-era and
+  fails to build on cuda12.4). `scripts/train_mcmc_remote.sh <ip> <port> [CAP_MAX] [ITERS]`
+  tars (`COPYFILE_DISABLE=1 --no-xattrs`) + scp's `ed/`, runs `scripts/pod_run_3dgs_mcmc.sh`
+  (`--cap_max` + `--scale_reg/--opacity_reg/--noise_lr` + `--data_device cpu`). **PIN
+  `numpy<2`** AFTER the opencv pip (opencv pulls numpy>=2 back; torch 2.1 ABI breaks ->
+  "Numpy is not available" at image load). **ALWAYS `runpod_pod.py delete <id>` after.**
+- **Result (scene15):** RTX 4090, cap_max 2.5M, 30k iters -> held-out **PSNR 18.65 / SSIM
+  0.7175 / LPIPS 0.245**. SSIM beats brush (0.665); PSNR is ~flat but at 1.5x the resolution
+  (1536 vs ~1024 — higher res systematically lowers PSNR). More 3D detail than the 2DGS
+  scene14, at the cost of 3DGS's edge spikes + soft foreground floaters.
+- **Clean (MCMC ply = standard 3DGS, ~892m offset):** `despike_ply.py IN clean.ply 0.3 5 0.3
+  0.25 0.06 <box±50m> 1.0 1.0 0.4 20 1.0` — spatial-only: spikes + haze + op-floor + SOR +
+  keep-largest-CC, **glint DISABLED** (`sat_thr>=1.0`, the new guard — the hardcoded pure-hue/
+  white clauses eat stylized terrain). MCMC parks ~30% of its budget at low opacity (the
+  relocation "dead" pool) so the op-floor drops ~800k harmlessly. Then RECENTER to origin in
+  numpy (splat-transform `-t` mis-parses leading-minus values) — **the viewer renders BLANK
+  if content is ~892m from origin**; scene14/scene15 settings target the ORIGIN.
+- **SOG:** `set_viewer_camera.py centered.ply settings.json` (it applies the `-r -90` itself)
+  then `splat-transform centered.ply -N -G 0.15,0.15,0.02 -H 0 -r -90,0,0 scene15.sog -w`.
+  Keep `-G` GENTLE (0.15,0.15,0.02) — `0.2,0.22,0.05` punched holes through real terrain.
+  `-H 0` (drop SH) keeps the SOG small + matte (fine for this diffuse rock); full SH was 24MB.
+- **Viewer A/B:** index.html now reads `?content=<file>` (default scene15.sog) so you can
+  compare live: `…/?content=scene14.sog` vs the default. Both SOGs ship in out/site.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
