@@ -232,6 +232,40 @@ Gotchas (learned the hard way on Electric Dreams):
   ticks a Python script never yields) -> expect bare terrain + hero meshes.
 - Non-destructive: one transient SceneCapture2D, deleted after; no global cvars.
 
+## IN-EDITOR (non-headless) capture — the BIG quality lever (PCG foliage + GT depth)
+The headless `-Cmd` captures are MISSING the PCG foliage: a probe showed the live GUI
+editor has **39,369 foliage instances vs 4 headless** (`instanced=4`). Every headless
+splat (scene6-15) reconstructed a near-bare rock scene; the real level is densely
+vegetated. So for a faithful splat, capture in the LIVE editor. `ue_capture/capture_editor.py`
++ `scripts/capture_editor_run.sh` do this **TICK-DRIVEN** (register a slate post-tick
+callback + return; a state machine walks the poses while the editor ticks -> PCG generates,
+TSR converges). Same env as headless (UE_NOSKY/ELEVATIONS/N_AZ/CAP_RES/FOCUS_CM/...) plus
+UE_SETTLE_TICKS (wait for WP+PCG, ~450) and UE_CONVERGE_TICKS (per-pose TSR, ~12).
+- **Three launch blockers (all fixed in capture_editor_run.sh), learned the hard way:**
+  1. **`Binaries/Mac/UnrealEditor` is a STUB** that re-execs the `.app` copy and exits
+     (exit 1 in ~4s, detaching the real editor) -> launch the **`.app` binary directly**
+     (`UnrealEditor.app/Contents/MacOS/UnrealEditor`).
+  2. **`-ExecutePythonScript` is run-then-QUIT** automation: the editor calls QUIT_EDITOR
+     the instant the script returns, before any tick fires -> use **`-ExecCmds="py <script>"`**
+     (console context) so the editor stays open and ticks.
+  3. The `ps aux | grep` abort-guard **self-matched** other processes' command lines ->
+     **`pgrep -x UnrealEditor`** (exact exe name; headless is `-Cmd`, not matched).
+  Also: NO `-RenderOffScreen` (want real GPU rendering); WP load via `get_actor_descs()`
+  (not `get_actor_descriptor_instances`, which doesn't exist).
+- **The editor must be launched from an interactive GUI session** (window-server/Metal).
+  Claude's automation shell, `!` in chat, and `open` from it all FAIL (editor exits early,
+  no render context). The bridge that WORKS once the user has **Terminal open**:
+  `osascript -e 'tell application "Terminal" to do script "<path-to-.command>"'` — runs in
+  their GUI session. Keep the AppleScript arg a quote-free FILE PATH (a `.command`); inline
+  commands with `"` break AppleScript string parsing. The `.command` does `exec >
+  /tmp/bridge_run.txt 2>&1` so its output is readable. After that, captures can be driven
+  programmatically via the bridge (no per-launch user action).
+- **GT depth (TODO, now feasible in-editor):** headless `export_render_target` is 8-bit and
+  saturates (depth in cm > 255 -> flat 255); the in-editor High-Res Screenshot buffer-viz
+  dumps `SceneDepth` as float EXR. Metric depth needs no SfM alignment (good, since our
+  exact-pose COLMAP has only a random init cloud, so monocular depth-reg's `make_depth_scale`
+  can't align).
+
 ## Trainer scale limits (important, do not re-litigate)
 The trainer targets the ~1 m diorama and does NOT generalise to a large photoreal
 scene. Hardening added so it at least doesn't crash: `initpc._voxel_grid` caps
