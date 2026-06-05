@@ -275,6 +275,17 @@ COLMAP registered 91 views):
 **brush is the standing LOCAL real-3DGS trainer; Runpod is only faster.** View a .ply
 in SuperSplat (browser) or `brush <ply> --with-viewer`.
 
+## FOLIAGE spikiness — Mip-Splatting ON MAC (brush `--render-mode mip`)
+Thin vegetation renders as aliased spikes in vanilla 3DGS. The fix is Mip-Splatting (3D
+smoothing + screen-space anti-alias filter) — and brush has it **built in and working on
+Metal**: add `--render-mode mip` (+ `--split-at-screen-size 0.1` to force-split oversized
+spiky gaussians). No CUDA/cloud, no different trainer, no re-capture — just retrain the
+same dataset. Output is a normal .ply -> same clean/SOG/viewer pipeline. Softened the
+foliage + best SSIM (0.665 vs 0.645). GOTCHAS: `--lpips-loss-weight` PANICS on the Metal
+backend (burn op unimplemented — leave it 0); standalone 2DGS/Mip-Splatting GitHub repos
+are CUDA-only. brush also has an intermittent cubecl `unwrap()` GPU panic mid-train — a
+late checkpoint (metrics plateau ~22k) is fine. Live `scene11.sog` used this.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric
