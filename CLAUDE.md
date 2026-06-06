@@ -415,19 +415,29 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   `ssh … tail runv.log` (ALL_DONE + ply_bytes) before taking over.
 - **Vanilla ply = full SH degree 3 + normals (62 props)**, ~248 bytes/gaussian, in OpenCV
   WORLD coords (~892m X offset). Clean → recenter → SOG exactly like MCMC/2DGS:
-  - **Clean (foliage-preserving, full-coverage is forgiving):** `despike_ply.py IN
-    clean.ply 0.4 5 1.0 0.25 0.03 <box±~50m around median> 1.0 1.0 0.5 16 1.5` — spikes
-    (vanilla makes edge needles), haze blobs, op-floor 0.03 (GENTLE — foliage is semi-
-    transparent; only ~8% sat below 0.05), box-crop to the island, **glint OFF**
-    (`sat=val=1.0`), SOR 0.5/k16, keep-largest-CC at 1.5m voxels. Kept 1.05M of 1.17M (90%).
+  - **Clean GENTLY — over-cleaning STRIPS the ground (this bit scene17 → fixed in scene18).**
+    The terrain reconstructs as FAINT + SPARSE gaussians (oblique/grazing capture); the
+    aggressive recipe `0.4 5 1.0 0.25 0.03 <box> 1.0 1.0 0.5 16 1.5` (op-floor 0.03 + SOR 0.5
+    + keep-largest-CC 1.5) plus a `splat-transform -G` floater filter read that real ground as
+    floaters and punched **splotchy gray holes** (the user's "splotchy / gaps"). DIAGNOSE by
+    rendering the RAW (uncleaned, no `-G`) SOG — if its ground is solid (it was: complete-
+    coverage capture + vanilla densify fill the ground fine), the CLEAN is the culprit, not the
+    reconstruction. **scene18 winning recipe:** `despike_ply.py IN clean.ply 0.45 5 2.5 0.12
+    0.01 <box±~50m around median> 1.0 1.0 1.3 16 0` — spikes (0.45, vanilla edge needles) +
+    HUGE-haze only (2.5m) + **op-floor 0.01** (NOT 0.03 — ground is faint) + box + glint OFF +
+    **lenient SOR 1.3** (peels only isolated AIR floaters; 0.5 ate ground — at 1.3 it drops 3K
+    vs 25K) + **NO keep-largest-CC** (cc=0; CC can drop disconnected-but-real ground patches).
+    Kept 1.12M of 1.17M (96%). Residual faint dark air-haze (no-sky background) is medium-sized
+    (not big+faint), so the haze filter can't catch it without risking ground — left in.
   - **Recenter to origin IN NUMPY** (subtract median xyz; splat-transform `-t` mis-parses
     leading-minus; viewer renders BLANK far from origin) — there is NO recenter script,
     inline it. Then `set_viewer_camera.py centered.ply sceneN.json` (it **requires an
     EXISTING json to update** — `cp` a prior sceneN.json first; it only rewrites `cameras`).
-  - **SOG:** `splat-transform centered.ply -N -G 0.15,0.15,0.02 -H 0 -r -90,0,0 scene17.sog
-    -w` (gentle `-G`; `-H 0` drops SH → 12.5MB matte). The site default settings.json must
-    mirror the default scene's json (`contents` defaults to sogName but `settings` defaults
-    to ./settings.json) — `cp scene17.json settings.json` after fitting the camera.
+  - **SOG:** `splat-transform centered.ply -N -H 0 -r -90,0,0 scene18.sog -w` — **NO `-G`
+    floater filter** (it voxel-drops sparse gaussians = thin ground = MORE holes; the despike
+    SOR already handles floaters). `-H 0` drops SH → ~14MB matte. The site default settings.json
+    must mirror the default scene's json (`contents` defaults to sogName but `settings` defaults
+    to ./settings.json) — `cp scene18.json settings.json` after fitting the camera.
 - **Full-orbit QA (the user-mandated gate — never 2-3 angles):** `scripts/orbit_poses.py
   <sceneN.json> <dir> 0,0,0 <dist> <elev> <n>` writes pose JSONs around the ORIGIN (content
   is recentered); load each `?content=scene17.sog&settings=<dir>/poseK.json&noui` in the
@@ -437,7 +447,9 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   matched orbit poses at scene16's target. rm the qa* pose dirs before the Pages commit.
 - **Deploy:** `out/site/` is its OWN git repo (`phdev/electric-dreams-splat`, the Pages
   site) — commit+push there to deploy (the code repo is `phdev/ue-splat-capture`; `out/` is
-  gitignored in it). scene17 is the default; dropdown keeps scene16 (brush, soft) for A/B.
+  gitignored in it). **scene18** (gap-filled vanilla) is the default; dropdown keeps scene16
+  (brush, soft) for A/B. BUMP the SOG filename each deploy (scene17→scene18) so the Pages CDN
+  + browser cache miss — the user sees the change without a manual hard-refresh of the SOG.
 
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
