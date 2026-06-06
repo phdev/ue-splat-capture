@@ -14,7 +14,7 @@ SSH=(ssh -i "$KEY" -p "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=
 SCP() { scp -i "$KEY" -P "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$@"; }
 
 echo "=== tar dataset (no AppleDouble/xattrs) ==="
-( cd out/ed_ns_mcmc && COPYFILE_DISABLE=1 tar --no-xattrs -czf /tmp/ed_mcmc.tar.gz ed )
+( cd out/ed_ns_mcmc && COPYFILE_DISABLE=1 tar -h --no-xattrs -czf /tmp/ed_mcmc.tar.gz ed )  # -h: follow the ed symlink
 echo "ed.tar.gz: $(du -h /tmp/ed_mcmc.tar.gz | cut -f1)"
 
 echo "=== upload ==="

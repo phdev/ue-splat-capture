@@ -387,6 +387,58 @@ passes (dome 240 + ground 108 + grid 64 = 412) at **1536px** with `UE_NOSKY=1` +
 - **Viewer A/B:** index.html now reads `?content=<file>` (default scene15.sog) so you can
   compare live: `…/?content=scene14.sog` vs the default. Both SOGs ship in out/site.
 
+## HIGHEST-CONFIDENCE Runpod path: VANILLA Inria 3DGS (the scene17 winner)
+When you want a SHARP, complete-coverage splat on novel/dense data and need it to
+just-work, train **vanilla Inria 3DGS** (graphdeco-inria/gaussian-splatting) on the
+exact-pose dataset — NOT MCMC. MCMC's noise-injection DIVERGES on dense PCG foliage
+(scene16 attempt: held-out PSNR ~10.5, train ~9.6 — never fit), and brush completes but
+is SOFT (~16 on the full-coverage 441-view data). Vanilla's unbounded densify fits hard
+foliage/detail and is STABLE (no noise injection). **Result (scene17): held-out PSNR
+19.32 / SSIM 0.619 / LPIPS 0.365, 1.17M gaussians, ~41 min on an A40 — +3.3 dB over
+brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
+- **Runners:** `scripts/pod_run_3dgs_exact.sh` (pod-side: clones Inria, pins `numpy<2`
+  AFTER opencv, builds diff-gaussian-rasterization + simple-knn, `train.py --eval
+  --data_device cpu`, then render + metrics). Aggressive-densify knobs as env:
+  `GRAD_THRESH` (default 0.00013, < the 0.0002 default = more splits/clones) and
+  `DENSIFY_UNTIL` (default 20000, > 15000 default = keep densifying longer) — these grew
+  it to 1.17M (the conservative defaults left an earlier run at ~700K). `python -u` so the
+  per-`--test_iterations` PSNR streams live.
+- **Orchestrator:** `scripts/train_vanilla_remote.sh <ip> <port> [ITERS=30000]
+  [GRAD_THRESH=0.00013] [DENSIFY_UNTIL=20000]` — tars `out/ed_ns_mcmc/ed` with **`tar -h`**
+  (it's a symlink to the real COLMAP dataset), scp's it + the runner, launches under
+  `nohup`, polls runv.log for `ALL_DONE`, downloads the ply →
+  `out/ed_full2_vanilla/vanilla_<ITERS>.ply`. GOTCHA: the poll/download step can stall on a
+  flaky SSH (the orchestrator hung after `ALL_DONE` once with an empty local dir + no scp
+  running) — if so, just `scp` the ply down manually
+  (`/workspace/ed/output_v/point_cloud/iteration_<ITERS>/point_cloud.ply`) and
+  `runpod_pod.py delete <id>`. The ply is ready on the pod regardless; verify via
+  `ssh … tail runv.log` (ALL_DONE + ply_bytes) before taking over.
+- **Vanilla ply = full SH degree 3 + normals (62 props)**, ~248 bytes/gaussian, in OpenCV
+  WORLD coords (~892m X offset). Clean → recenter → SOG exactly like MCMC/2DGS:
+  - **Clean (foliage-preserving, full-coverage is forgiving):** `despike_ply.py IN
+    clean.ply 0.4 5 1.0 0.25 0.03 <box±~50m around median> 1.0 1.0 0.5 16 1.5` — spikes
+    (vanilla makes edge needles), haze blobs, op-floor 0.03 (GENTLE — foliage is semi-
+    transparent; only ~8% sat below 0.05), box-crop to the island, **glint OFF**
+    (`sat=val=1.0`), SOR 0.5/k16, keep-largest-CC at 1.5m voxels. Kept 1.05M of 1.17M (90%).
+  - **Recenter to origin IN NUMPY** (subtract median xyz; splat-transform `-t` mis-parses
+    leading-minus; viewer renders BLANK far from origin) — there is NO recenter script,
+    inline it. Then `set_viewer_camera.py centered.ply sceneN.json` (it **requires an
+    EXISTING json to update** — `cp` a prior sceneN.json first; it only rewrites `cameras`).
+  - **SOG:** `splat-transform centered.ply -N -G 0.15,0.15,0.02 -H 0 -r -90,0,0 scene17.sog
+    -w` (gentle `-G`; `-H 0` drops SH → 12.5MB matte). The site default settings.json must
+    mirror the default scene's json (`contents` defaults to sogName but `settings` defaults
+    to ./settings.json) — `cp scene17.json settings.json` after fitting the camera.
+- **Full-orbit QA (the user-mandated gate — never 2-3 angles):** `scripts/orbit_poses.py
+  <sceneN.json> <dir> 0,0,0 <dist> <elev> <n>` writes pose JSONs around the ORIGIN (content
+  is recentered); load each `?content=scene17.sog&settings=<dir>/poseK.json&noui` in the
+  **headed** browse binary (`~/.claude/skills/gstack/browse/dist/browse --headed`; headless
+  has no WebGPU). 8 mid (elev 18) + 6 low (elev 6) confirmed no floating-island gap, foliage
+  all around. For the brush A/B use scene16's OWN center/scale (different coords) — generate
+  matched orbit poses at scene16's target. rm the qa* pose dirs before the Pages commit.
+- **Deploy:** `out/site/` is its OWN git repo (`phdev/electric-dreams-splat`, the Pages
+  site) — commit+push there to deploy (the code repo is `phdev/ue-splat-capture`; `out/` is
+  gitignored in it). scene17 is the default; dropdown keeps scene16 (brush, soft) for A/B.
+
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
 `results/baseline.json`. `make verify` flags regressions beyond per-metric

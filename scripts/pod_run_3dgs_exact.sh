@@ -12,6 +12,11 @@ export PATH="$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0;8.6;8.9+PTX}"
 ITERS="${ITERS:-30000}"
+# Aggressive densification so vanilla grows to millions of gaussians (sharpness lever):
+# lower grad threshold + longer densify window than the conservative defaults that left
+# the earlier run at only 700K splats.
+GRAD_THRESH="${GRAD_THRESH:-0.00013}"      # default 0.0002 -> lower = more splits/clones
+DENSIFY_UNTIL="${DENSIFY_UNTIL:-20000}"    # default 15000 -> keep densifying longer
 log(){ echo "[$(date +%H:%M:%S)] $*"; }
 
 log "STAGE_CLONE"
@@ -29,7 +34,8 @@ log "DATASET imgs=$NIMG iters=$ITERS (vanilla 3DGS, unbounded densify)"
 
 log "STAGE_TRAIN"
 python3 -u gsv/train.py -s /workspace/ed -m /workspace/ed/output_v --eval --data_device cpu \
-  --iterations "$ITERS" --test_iterations 7000 15000 30000 "$ITERS" --save_iterations "$ITERS" \
+  --densify_grad_threshold "$GRAD_THRESH" --densify_until_iter "$DENSIFY_UNTIL" \
+  --iterations "$ITERS" --test_iterations 7000 15000 30000 "$ITERS" --save_iterations 15000 30000 "$ITERS" \
   >trainv.log 2>&1 || { log TRAIN_FAIL; tail -60 trainv.log; exit 1; }
 grep -iE "Evaluating|PSNR|\[ITER" trainv.log | tail -10 || true
 
