@@ -125,6 +125,28 @@ def _dump_scene(unreal, focus):
         unreal.log(f"[ed] DUMP named-rock: '{lbl}' ({cls}) top={top:.0f}cm dist={d:.0f}cm")
 
 
+def _rerun_construction(unreal, focus, radius):
+    """Re-run Blueprint construction scripts on actors near the focus. The hero rock is a
+    Rock_*_BP whose mesh is ASSIGNED in its construction script; when WP loads the actor
+    shell without (re)running construction, the mesh is unset -> collapsed bounds -> spire
+    invisible. rerun_construction_scripts() forces the BP to (re)build its mesh. Returns #run."""
+    fx, fy = focus[0], focus[1]
+    k = 0
+    try:
+        actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    except Exception:
+        actors = []
+    for a in actors:
+        try:
+            o, e = a.get_actor_bounds(False)
+            if ((o.x - fx) ** 2 + (o.y - fy) ** 2) ** 0.5 > radius:
+                continue
+            a.rerun_construction_scripts(); k += 1
+        except Exception:
+            pass
+    return k
+
+
 def _wp_load(unreal):
     """Pin ALL World-Partition actor descriptors loaded (re-callable; streaming can evict,
     so we re-pin during settle until the scene height stabilizes). Returns #descriptors."""
@@ -150,6 +172,7 @@ def _tick(delta_seconds):
             _S["wait"] -= 1
             if _S["phase"] == "settle" and _S["wait"] % 120 == 0:
                 _wp_load(unreal)                          # re-pin WP (streaming can evict)
+                _rerun_construction(unreal, _S["focus"], _S["radius"] * 2.0)  # build Rock_BP meshes
                 ism, inst = _count_foliage(unreal)
                 top, nt, nm = _scene_top(unreal, _S["focus"], _S["radius"] * 1.5)
                 unreal.log(f"[ed] settling... {_S['wait']} left; foliage ISM={ism} inst={inst}; "
@@ -230,14 +253,20 @@ def _tick(delta_seconds):
             if _S.get("dactor"):
                 try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(_S["dactor"])
                 except Exception: pass
-            try: unreal.SystemLibrary.quit_editor()
-            except Exception: pass
+            # UE_NO_QUIT=1 (warm-editor capture run from the user's open editor console) ->
+            # leave their editor open instead of closing it when the capture finishes.
+            if os.environ.get("UE_NO_QUIT") != "1":
+                try: unreal.SystemLibrary.quit_editor()
+                except Exception: pass
+            else:
+                unreal.log("[ed] UE_NO_QUIT=1 -> capture done, leaving editor open")
     except Exception as e:
         unreal.log_error(f"[ed] tick error: {e}")
         try: unreal.unregister_slate_post_tick_callback(_S["handle"])
         except Exception: pass
-        try: unreal.SystemLibrary.quit_editor()
-        except Exception: pass
+        if os.environ.get("UE_NO_QUIT") != "1":
+            try: unreal.SystemLibrary.quit_editor()
+            except Exception: pass
 
 
 def main():
@@ -291,9 +320,10 @@ def main():
     except Exception as e:
         unreal.log_warning(f"[ed] data layers: {e}")
     ng = _wp_load(unreal)
+    kc = _rerun_construction(unreal, focus, radius * 2.0)
     top0, nt0, nm0 = _scene_top(unreal, focus, radius * 1.5)
-    unreal.log(f"[ed] WP: pinned {ng} actor descriptors; initial rock_top={top0:.0f}cm "
-               f"({nt0} rocks; tallest='{nm0}')")
+    unreal.log(f"[ed] WP: pinned {ng} descriptors; reran construction on {kc} actors; "
+               f"initial rock_top={top0:.0f}cm ({nt0} rocks; tallest='{nm0}')")
     try:
         for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors():
             pcg = a.get_component_by_class(unreal.PCGComponent)
