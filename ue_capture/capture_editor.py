@@ -260,10 +260,21 @@ def main():
         wide = rig.orbit_hemisphere([fx, fy, 1500.0], 6500.0,
                                     elevations_deg=(5.0, 16.0, 28.0), n_azimuth=40, heldout_every=6)  # ~120, full patch + sides
         grid = rig.grid_nadir([fx, fy, 1150.0], 4800.0, 3500.0, n_side=9, converge=0.2, heldout_every=8)  # 81, whole patch nadir
+        passes = list(dome) + list(wide) + list(grid)
+        # UE_GROUND_DENSE=1: a denser, LOWER, more-converged nadir grid to add ground coverage +
+        # GT-depth maps where the patches show (paired with UE_DEPTH for depth-supervised fill).
+        # converge 0.4 tilts cams so they also see obliquely INTO gaps between rock masses (a flat
+        # nadir can't see under canopy -- that ground is occluded from every camera -- but the
+        # oblique tilt + lower height recover more of the between-rock ground than the 11.5m grid).
+        gdense = []
+        if os.environ.get("UE_GROUND_DENSE") == "1":
+            gdense = rig.grid_nadir([fx, fy, 850.0], 5000.0, 3800.0, n_side=11, converge=0.4, heldout_every=8)  # 121
+            passes = passes + list(gdense)
         poses = []
-        for i, p in enumerate(list(dome) + list(wide) + list(grid)):
+        for i, p in enumerate(passes):
             q = dict(p); q["index"] = i; poses.append(q)
-        unreal.log(f"[ed] FULL: dome {len(dome)} + wide {len(wide)} + grid {len(grid)} = {len(poses)}")
+        unreal.log(f"[ed] FULL: dome {len(dome)} + wide {len(wide)} + grid {len(grid)}"
+                   f" + gdense {len(gdense)} = {len(poses)}")
     else:
         elev = tuple(float(x) for x in os.environ.get("UE_ELEVATIONS", "8,22,36,50,64,76").split(","))
         poses = rig.orbit_hemisphere(focus, radius, elevations_deg=elev,
