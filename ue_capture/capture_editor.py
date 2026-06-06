@@ -54,19 +54,124 @@ def _count_foliage(unreal):
     return n_ism, n_inst
 
 
+def _scene_top(unreal, focus, radius):
+    """Top-Z (cm) of the tallest NON-INSTANCED static-mesh actor within `radius` (xy) of
+    focus, its count, and that tallest actor's label. EXCLUDES instanced meshes (PCG
+    foliage/trees subclass StaticMeshComponent and would mask a missing rock) so this
+    actually detects the hero ROCK SPIRE -- which silently failed to stream into the depth
+    capture. We gate the capture on this so it can't shoot a spire-less scene again."""
+    fx, fy = focus[0], focus[1]
+    top = -1e18; n = 0; name = ""
+    try:
+        actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    except Exception:
+        actors = []
+    for a in actors:
+        try:
+            smcs = a.get_components_by_class(unreal.StaticMeshComponent)
+            if not any(not isinstance(c, unreal.InstancedStaticMeshComponent) for c in smcs):
+                continue                               # only foliage/instanced here -> skip
+            o, e = a.get_actor_bounds(False)           # (origin, box_extent)
+            if ((o.x - fx) ** 2 + (o.y - fy) ** 2) ** 0.5 > radius:
+                continue
+            n += 1
+            t = o.z + e.z
+            if t > top:
+                top = t
+                try: name = a.get_actor_label()
+                except Exception: name = str(a.get_name())
+        except Exception:
+            pass
+    return (top if n else 0.0), n, name
+
+
+def _dump_scene(unreal, focus):
+    """One-shot diagnostic: what tall geometry IS loaded? Logs the 10 tallest non-instanced
+    static-mesh actors anywhere (name, top-Z, distance from focus) + Landscape actor bounds +
+    anything named like rock/spire/cliff. Tells us whether the spire is a not-streaming static
+    mesh, part of the Landscape (streams differently), or genuinely absent."""
+    fx, fy, fz = focus
+    try:
+        actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    except Exception:
+        actors = []
+    rows = []; land = []; named = []
+    for a in actors:
+        try:
+            cls = a.get_class().get_name()
+            try: lbl = a.get_actor_label()
+            except Exception: lbl = a.get_name()
+            if "Landscape" in cls:
+                o, e = a.get_actor_bounds(False)
+                land.append((lbl, cls, o.z + e.z, e.z * 2))
+                continue
+            smcs = a.get_components_by_class(unreal.StaticMeshComponent)
+            if any(not isinstance(c, unreal.InstancedStaticMeshComponent) for c in smcs):
+                o, e = a.get_actor_bounds(False)
+                d = ((o.x - fx) ** 2 + (o.y - fy) ** 2) ** 0.5
+                rows.append((o.z + e.z, lbl, d, e.z * 2))
+            if any(s in lbl.lower() for s in ("rock", "spire", "cliff", "stone", "boulder", "mesa")):
+                o, e = a.get_actor_bounds(False)
+                named.append((lbl, cls, o.z + e.z, ((o.x-fx)**2+(o.y-fy)**2)**0.5))
+        except Exception:
+            pass
+    rows.sort(reverse=True)
+    unreal.log(f"[ed] DUMP: total actors={len(actors)} focus_z={fz:.0f}")
+    for top, lbl, d, h in rows[:10]:
+        unreal.log(f"[ed] DUMP tall-SM: top={top:.0f}cm h={h:.0f}cm dist={d:.0f}cm '{lbl}'")
+    for lbl, cls, top, h in land:
+        unreal.log(f"[ed] DUMP LANDSCAPE: '{lbl}' ({cls}) top={top:.0f}cm h={h:.0f}cm")
+    for lbl, cls, top, d in named[:10]:
+        unreal.log(f"[ed] DUMP named-rock: '{lbl}' ({cls}) top={top:.0f}cm dist={d:.0f}cm")
+
+
+def _wp_load(unreal):
+    """Pin ALL World-Partition actor descriptors loaded (re-callable; streaming can evict,
+    so we re-pin during settle until the scene height stabilizes). Returns #descriptors."""
+    try:
+        res = unreal.WorldPartitionBlueprintLibrary.get_actor_descs()
+        descs = res[1] if isinstance(res, (tuple, list)) else res
+        guids = []
+        for d in (descs or []):
+            try: guids.append(d.get_editor_property("guid"))
+            except Exception: pass
+        if guids:
+            unreal.WorldPartitionBlueprintLibrary.load_actors(guids)
+        return len(guids)
+    except Exception as e:
+        unreal.log_warning(f"[ed] WP load: {e}")
+        return 0
+
+
 def _tick(delta_seconds):
     import unreal
     try:
         if _S["wait"] > 0:
             _S["wait"] -= 1
             if _S["phase"] == "settle" and _S["wait"] % 120 == 0:
+                _wp_load(unreal)                          # re-pin WP (streaming can evict)
                 ism, inst = _count_foliage(unreal)
-                unreal.log(f"[ed] settling... {_S['wait']} ticks left; foliage ISM={ism} instances={inst}")
+                top, nt, nm = _scene_top(unreal, _S["focus"], _S["radius"] * 1.5)
+                unreal.log(f"[ed] settling... {_S['wait']} left; foliage ISM={ism} inst={inst}; "
+                           f"rock_top={top:.0f}cm ({nt} rocks near focus; tallest='{nm}')")
             return
 
         if _S["phase"] == "settle":
+            top, nt, nm = _scene_top(unreal, _S["focus"], _S["radius"] * 1.5)
             ism, inst = _count_foliage(unreal)
-            unreal.log(f"[ed] settled. foliage ISM={ism} instances={inst}. capturing {len(_S['poses'])} poses.")
+            # COMPLETENESS GATE: don't capture until the tall hero geometry (spire) has
+            # streamed in. If a min height is set and not yet met, re-pin WP + wait more
+            # (up to max_ext extensions) -- this is the guard that stops a silent
+            # spire-less capture like scene20. min_top<=0 disables the gate (probe/measure).
+            if _S["min_top"] > 0 and top < _S["min_top"] and _S["ext"] < _S["max_ext"]:
+                _S["ext"] += 1; _S["wait"] = 150; _wp_load(unreal)
+                unreal.log(f"[ed] GATE: scene_top={top:.0f}cm < min={_S['min_top']:.0f}cm "
+                           f"-> re-pin WP + wait (ext {_S['ext']}/{_S['max_ext']})")
+                return
+            gate = "OK" if (_S["min_top"] <= 0 or top >= _S["min_top"]) else "PROCEED-ANYWAY(maxed)"
+            unreal.log(f"[ed] settled [{gate}]. foliage ISM={ism} inst={inst}; "
+                       f"rock_top={top:.0f}cm ({nt} rocks; tallest='{nm}'). capturing {len(_S['poses'])} poses.")
+            _dump_scene(unreal, _S["focus"])             # one-shot: what tall geometry IS loaded
             _S["phase"] = "move"; _S["i"] = 0
 
         if _S["phase"] == "move":
@@ -158,21 +263,37 @@ def main():
         else [89287.5, -5187.4, 1849.0]
     radius = float(os.environ.get("UE_ORBIT_RADIUS_CM", "1800"))
 
-    # nudge World Partition + PCG to populate (the GUI editor ticks will finish it).
-    # Use get_actor_descs() (the headless-proven API; get_actor_descriptor_instances
-    # doesn't exist) -> load all descriptors so the capture region is streamed in.
+    # World Partition streams by SOURCE (the viewport). A fresh bridge-launched editor leaves
+    # the viewport wherever it booted -> the focus region's big rock (spire) never streams,
+    # even though PCG foliage (which we generate_local) is present. So: (1) move the editor
+    # viewport TO the focus so WP streams that region; (2) activate all data layers (the spire
+    # may be on a layer that's off by default -> its descriptor wouldn't even be returned);
+    # (3) pin all actor descriptors. Then settle re-pins + the gate verifies the rock loaded.
     try:
-        res = unreal.WorldPartitionBlueprintLibrary.get_actor_descs()
-        descs = res[1] if isinstance(res, (tuple, list)) else res
-        guids = []
-        for d in (descs or []):
-            try: guids.append(d.get_editor_property("guid"))
-            except Exception: pass
-        if guids:
-            unreal.WorldPartitionBlueprintLibrary.load_actors(guids)
-            unreal.log(f"[ed] WP: loading {len(guids)} actor descriptors")
+        unreal.EditorLevelLibrary.set_level_viewport_camera_info(
+            unreal.Vector(focus[0] - 3000, focus[1] - 3000, focus[2] + 2500),
+            unreal.Rotator(-25.0, 45.0, 0.0))
+        unreal.log("[ed] moved editor viewport to focus (WP streaming source)")
     except Exception as e:
-        unreal.log_warning(f"[ed] WP load: {e}")
+        unreal.log_warning(f"[ed] viewport move: {e}")
+    try:
+        dls = unreal.get_editor_subsystem(unreal.DataLayerEditorSubsystem)
+        layers = unreal.DataLayerEditorSubsystem.get_all_data_layers(dls) if hasattr(unreal.DataLayerEditorSubsystem, "get_all_data_layers") else dls.get_all_data_layers()
+        k = 0
+        for dl in (layers or []):
+            for fn in ("set_data_layer_is_loaded_in_editor", "set_data_layer_visibility"):
+                try:
+                    getattr(dls, fn)(dl, True, True); k += 1; break
+                except Exception:
+                    try: getattr(dls, fn)(dl, True); k += 1; break
+                    except Exception: pass
+        unreal.log(f"[ed] data layers activated: {k}/{len(layers or [])}")
+    except Exception as e:
+        unreal.log_warning(f"[ed] data layers: {e}")
+    ng = _wp_load(unreal)
+    top0, nt0, nm0 = _scene_top(unreal, focus, radius * 1.5)
+    unreal.log(f"[ed] WP: pinned {ng} actor descriptors; initial rock_top={top0:.0f}cm "
+               f"({nt0} rocks; tallest='{nm0}')")
     try:
         for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors():
             pcg = a.get_component_by_class(unreal.PCGComponent)
@@ -246,8 +367,11 @@ def main():
             dactor = dcomp = drt = None
 
     if probe:
-        poses = rig.orbit_hemisphere(focus, radius * 1.3, elevations_deg=(20.0, 45.0),
-                                     n_azimuth=4, heldout_every=0)
+        # LOW full-azimuth ring so the probe actually frames the hero spire silhouette
+        # (the old elev 20/45 x az0/90/180/270 looked down at the pit and missed it).
+        pelev = tuple(float(x) for x in os.environ.get("UE_PROBE_ELEV", "8,22").split(","))
+        poses = rig.orbit_hemisphere(focus, radius * 1.6, elevations_deg=pelev,
+                                     n_azimuth=int(os.environ.get("UE_PROBE_NAZ", "8")), heldout_every=0)
     elif os.environ.get("UE_FULL") == "1":
         # FULL-COVERAGE of the whole ~45m-radius terrain ISLAND (the extent probe showed a
         # finite ~90m patch; the first scene16 only reached ~25m -> floating-island edge).
@@ -284,7 +408,10 @@ def main():
                "poses": poses, "frames": [], "comp": comp, "rt": rt, "actor": actor, "world": world,
                "out_dir": out_dir, "caps": caps, "train_res": train_res, "hfov": hfov,
                "focus": focus, "radius": radius,
-               "dactor": dactor, "dcomp": dcomp, "drt": drt})
+               "dactor": dactor, "dcomp": dcomp, "drt": drt,
+               # completeness gate: require tall geometry (spire) loaded before capturing.
+               "min_top": float(os.environ.get("UE_MIN_SCENE_TOP_CM", "0")), "ext": 0,
+               "max_ext": int(os.environ.get("UE_MAX_SETTLE_EXT", "8"))})
     _S["handle"] = unreal.register_slate_post_tick_callback(_tick)
     unreal.log(f"[ed] registered tick callback; {len(poses)} poses, settle {_S['wait']} ticks. "
                f"focus={focus} radius={radius/100:.1f}m res={cap_res} ev={ev}")
