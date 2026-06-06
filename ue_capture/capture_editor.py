@@ -227,10 +227,20 @@ def main():
                          ("always_persist_rendering_state", True)]:
                 try: dcomp.set_editor_property(k, v)
                 except Exception: pass
-            drt = unreal.RenderingLibrary.create_render_target2d(dactor, cap_res, cap_res,
-                                                                 unreal.TextureRenderTargetFormat.RTF_RGBA32f)
+            # HALF-float RT (RTF_RGBA16F) is the one export_render_target writes as a true
+            # float EXR. RTF_RGBA32F instead exports a 16-bit PNG that treats the RT as [0,1]
+            # COLOR, so depth-in-cm (>>1) saturates to white -> metric LOST (verified). 16f
+            # holds our depth range (cm up to ~65504, precision ~0.5cm there); far/background
+            # overflows to +inf -> a clean background marker. So PREFER 16F; never 32F here.
+            fmt = fmtname = None
+            for nm in ("RTF_RGBA16F", "RTF_R16F"):
+                fmt = getattr(unreal.TextureRenderTargetFormat, nm, None)
+                if fmt is not None: fmtname = nm; break
+            if fmt is None:
+                raise RuntimeError("no float TextureRenderTargetFormat found")
+            drt = unreal.RenderingLibrary.create_render_target2d(dactor, cap_res, cap_res, fmt)
             dcomp.texture_target = drt
-            unreal.log(f"[ed] UE_DEPTH=1: depth SceneCapture2D armed (SCS_SCENE_DEPTH, RTF_RGBA32f, fov={hfov})")
+            unreal.log(f"[ed] UE_DEPTH=1: depth SceneCapture2D armed (SCS_SCENE_DEPTH, {fmtname}, fov={hfov})")
         except Exception as e:
             unreal.log_error(f"[ed] UE_DEPTH setup FAILED ({e}) -- continuing RGB-only")
             dactor = dcomp = drt = None
