@@ -196,6 +196,20 @@ def main():
     if probe:
         poses = rig.orbit_hemisphere(focus, radius * 1.3, elevations_deg=(20.0, 45.0),
                                      n_azimuth=4, heldout_every=0)
+    elif os.environ.get("UE_FULL") == "1":
+        # full 3-pass coverage in ONE editor session (one settle): spire dome + ground
+        # dome (fills terrain) + nadir grid (fills the basin floor the dome-only missed).
+        fx, fy = focus[0], focus[1]
+        dome = rig.orbit_hemisphere([fx, fy, 1849.0], 1800.0,
+                                    elevations_deg=(8.0, 22.0, 36.0, 50.0, 64.0, 76.0),
+                                    n_azimuth=40, heldout_every=6)
+        ground = rig.orbit_hemisphere([fx, fy, 1300.0], 3000.0,
+                                      elevations_deg=(28.0, 44.0, 60.0), n_azimuth=36, heldout_every=6)
+        grid = rig.grid_nadir([fx, fy, 1150.0], 2600.0, 1600.0, n_side=8, converge=0.25, heldout_every=8)
+        poses = []
+        for i, p in enumerate(list(dome) + list(ground) + list(grid)):
+            q = dict(p); q["index"] = i; poses.append(q)
+        unreal.log(f"[ed] FULL: dome {len(dome)} + ground {len(ground)} + grid {len(grid)} = {len(poses)}")
     else:
         elev = tuple(float(x) for x in os.environ.get("UE_ELEVATIONS", "8,22,36,50,64,76").split(","))
         poses = rig.orbit_hemisphere(focus, radius, elevations_deg=elev,
