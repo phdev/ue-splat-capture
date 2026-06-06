@@ -187,12 +187,14 @@ def _setup_capture(unreal, res, hfov, ev, depth=False):
     return actor, comp, rt
 
 
-def _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples=1):
+def _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples=1, depth=False):
     """Render each pose. When avg_samples>1, export N independent renders per pose
     (cam_IDX_SS.png) -- Lumen GI / specular / TSR noise is re-randomised each render
     and is what 3DGS turns into spiky foliage floaters; averaging the N samples
     (scripts/average_samples.py, run after) denoises each training view. `caps`
-    renders after each camera move flush stale temporal history before sampling."""
+    renders after each camera move flush stale temporal history before sampling.
+    When depth=True the float RT is exported as .EXR (export_render_target picks the
+    format from the extension; no ext -> 8-bit PNG that crushes the depth)."""
     frames = []
     for i, p in enumerate(poses):
         loc = unreal.Vector(*p["location_cm"])
@@ -210,6 +212,11 @@ def _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples=1)
                 if os.path.exists(raw) and not os.path.exists(raw + ".png"):
                     os.replace(raw, raw + ".png")
             png = os.path.join(out_dir, "images", base + ".png")   # produced by averaging
+        elif depth:
+            comp.capture_scene()
+            nm = base + ".exr"                          # .exr ext -> float EXR (preserves UE-cm depth)
+            unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", nm)
+            png = os.path.join(out_dir, "images", nm)
         else:
             comp.capture_scene()
             unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", base)
@@ -321,6 +328,38 @@ def main():
 
     actor, comp, rt = _setup_capture(unreal, cap_res, hfov, ev, depth=depth)
 
+    if os.environ.get("UE_EXTENT") == "1":
+        # Coverage audit: report the FULL level AABB (vs the capture focus/radius) so we
+        # know how much terrain a 30m-radius capture missed, + a high nadir overview.
+        mins = [1e18, 1e18, 1e18]; maxs = [-1e18, -1e18, -1e18]
+        for _d, c, half in valids:
+            for i in range(3):
+                mins[i] = min(mins[i], c[i] - half); maxs[i] = max(maxs[i], c[i] + half)
+        ext = [maxs[i] - mins[i] for i in range(3)]
+        ctr = [(mins[i] + maxs[i]) / 2.0 for i in range(3)]
+        unreal.log(f"[ext] FULL AABB extent_m={[round(e/100, 1) for e in ext]} center={[round(c) for c in ctr]}")
+        print(f"EXTENT_FULL extent_cm={[round(e) for e in ext]} center={[round(c) for c in ctr]} "
+              f"capture_focus={focus} capture_radius_cm={round(radius)}")
+        # center the overview on the CAPTURE FOCUS (the real geometry), not the AABB
+        # (which an outlier actor pollutes); height configurable to frame the terrain.
+        oc = list(focus)
+        h = float(os.environ.get("UE_OVERVIEW_HEIGHT_M", "120")) * 100.0
+        loc = unreal.Vector(oc[0], oc[1], oc[2] + h)
+        rot = unreal.MathLibrary.find_look_at_rotation(loc, unreal.Vector(oc[0], oc[1], oc[2]))
+        actor.set_actor_location_and_rotation(loc, rot, False, False)
+        for _ in range(6):
+            comp.capture_scene()
+        unreal.RenderingLibrary.export_render_target(world, rt, out_dir + "/images", "overview")
+        raw = os.path.join(out_dir, "images", "overview")
+        if os.path.exists(raw) and not os.path.exists(raw + ".png"):
+            os.replace(raw, raw + ".png")
+        print(f"EXTENT_DONE overview at height {h/100:.0f}m -> {out_dir}/images/overview.png")
+        try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(actor)
+        except Exception: pass
+        try: unreal.SystemLibrary.quit_editor()
+        except Exception: pass
+        return
+
     if os.environ.get("UE_DIAG") == "1":
         # Stability probe: render ONE foliage-heavy pose N times back-to-back, export
         # each. Diffing them reveals per-view instability (Lumen GI not converged /
@@ -357,7 +396,7 @@ def main():
         gposes = rig.grid_nadir(focus, gext, ght, n_side=gn, converge=gconv, heldout_every=8)
         unreal.log(f"[hl] terrain grid: {len(gposes)} cams ({gn}x{gn}), extent {gext/100:.0f}m, "
                    f"height {ght/100:.0f}m, converge {gconv}, avg_samples={avg_samples}")
-        frames = _render(unreal, world, gposes, comp, rt, actor, caps, out_dir, avg_samples)
+        frames = _render(unreal, world, gposes, comp, rt, actor, caps, out_dir, avg_samples, depth=depth)
         m = gext * 1.2
         export.write_ue_poses(os.path.join(out_dir, "ue_poses.json"), train_res, train_res, hfov,
                               frames, scene_meta={"background": [0.0, 0.0, 0.0],
@@ -415,7 +454,7 @@ def main():
         # a few wide OVERVIEW frames from a high ring, to eyeball geometry+framing
         poses = rig.orbit_hemisphere(focus, radius * 1.4, elevations_deg=(25.0, 50.0),
                                      n_azimuth=4, heldout_every=0)
-        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir)
+        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir, depth=depth)
         unreal.log(f"[hl] PROBE wrote {len(frames)} overview frames")
         print(f"PROBE_DONE actors={na} sm={sm} ism={ism} focus={focus} "
               f"radius_m={radius/100:.1f} frames={len(frames)} out={out_dir}/images")
@@ -424,7 +463,7 @@ def main():
         poses = rig.orbit_hemisphere(focus, radius, elevations_deg=elev,
                                      n_azimuth=n_az, heldout_every=6)
         unreal.log(f"[hl] full orbit: {len(poses)} cams, elevations={elev}, avg_samples={avg_samples}")
-        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples)
+        frames = _render(unreal, world, poses, comp, rt, actor, caps, out_dir, avg_samples, depth=depth)
         ext = radius * 0.85
         ue_poses = os.path.join(out_dir, "ue_poses.json")
         export.write_ue_poses(ue_poses, train_res, train_res, hfov, frames, scene_meta={
