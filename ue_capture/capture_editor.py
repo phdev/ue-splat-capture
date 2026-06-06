@@ -9,7 +9,9 @@ poses one capture per few ticks. Launch it with scripts/capture_editor_run.sh.
 Env: UE_CAPTURE_OUT (abs), UE_FOCUS_CM, UE_ORBIT_RADIUS_CM, UE_ELEVATIONS, UE_N_AZ,
      UE_HFOV, UE_CAP_RES, UE_TRAIN_RES, UE_CAPTURE_EV, UE_SETTLE_TICKS (wait for
      level+PCG, default 600), UE_CONVERGE_TICKS (per-pose TSR settle, default 10),
-     UE_PROBE (1 = a few overview poses to validate foliage).
+     UE_PROBE (1 = a few overview poses to validate foliage),
+     UE_DEPTH (1 = also export GT metric depth EXR per pose into depth/, via a second
+     lockstep SceneCapture2D using SCS_SCENE_DEPTH -> RTF_RGBA32f; for depth-reg training).
 """
 import os
 import sys
@@ -72,6 +74,8 @@ def _tick(delta_seconds):
             loc = unreal.Vector(*p["location_cm"])
             rot = unreal.MathLibrary.find_look_at_rotation(loc, unreal.Vector(*p["target_cm"]))
             _S["actor"].set_actor_location_and_rotation(loc, rot, False, False)
+            if _S.get("dactor"):
+                _S["dactor"].set_actor_location_and_rotation(loc, rot, False, False)
             for _ in range(_S["caps"]):
                 _S["comp"].capture_scene()                  # prime; let TSR converge over the wait
             _S["wait"] = int(os.environ.get("UE_CONVERGE_TICKS", "10"))
@@ -86,7 +90,15 @@ def _tick(delta_seconds):
             raw = os.path.join(_S["out_dir"], "images", base); png = raw + ".png"
             if os.path.exists(raw) and not os.path.exists(png):
                 os.replace(raw, png)
-            _S["frames"].append({"file_path": png, "split": p["split"],
+            depth_path = None
+            if _S.get("dcomp"):
+                _S["dcomp"].capture_scene()                 # depth is geometric; one capture is enough
+                unreal.RenderingLibrary.export_render_target(_S["world"], _S["drt"], _S["out_dir"] + "/depth", base)
+                draw = os.path.join(_S["out_dir"], "depth", base); dexr = draw + ".exr"
+                if os.path.exists(draw) and not os.path.exists(dexr):
+                    os.replace(draw, dexr)
+                depth_path = dexr
+            _S["frames"].append({"file_path": png, "split": p["split"], "depth_path": depth_path,
                                  "location_cm": export.location_from_actor(unreal, _S["actor"]),
                                  "basis_ue": export.basis_from_actor(unreal, _S["actor"])})
             if (_S["i"] + 1) % 10 == 0:
@@ -110,6 +122,9 @@ def _tick(delta_seconds):
             except Exception: pass
             try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(_S["actor"])
             except Exception: pass
+            if _S.get("dactor"):
+                try: unreal.get_editor_subsystem(unreal.EditorActorSubsystem).destroy_actor(_S["dactor"])
+                except Exception: pass
             try: unreal.SystemLibrary.quit_editor()
             except Exception: pass
     except Exception as e:
@@ -193,6 +208,33 @@ def main():
                                                         unreal.TextureRenderTargetFormat.RTF_RGBA8)
     comp.texture_target = rt
 
+    # Optional GT metric-depth capture (UE_DEPTH=1): a SECOND SceneCapture2D bound to the
+    # SAME view each pose, SCS_SCENE_DEPTH -> FLOAT RT (RTF_RGBA32f) -> EXR. SCS_SceneDepth
+    # is LINEAR depth in world units (cm); a 32f RT keeps full precision (16f loses it past
+    # a few thousand cm). export_render_target writes EXR for a float RT. Metric depth needs
+    # NO SfM scale alignment (our COLMAP init is random) -> directly usable for depth-reg.
+    dactor = dcomp = drt = None
+    if os.environ.get("UE_DEPTH") == "1":
+        try:
+            os.makedirs(os.path.join(out_dir, "depth"), exist_ok=True)
+            dactor = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).spawn_actor_from_class(
+                unreal.SceneCapture2D, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
+            dcomp = dactor.capture_component2d
+            dcomp.fov_angle = hfov
+            # SCS_SceneDepth -> SCS_SCENE_DEPTH in the Python binding (matches SCS_FINAL_COLOR_LDR above)
+            dcomp.capture_source = unreal.SceneCaptureSource.SCS_SCENE_DEPTH
+            for k, v in [("capture_every_frame", False), ("capture_on_movement", False),
+                         ("always_persist_rendering_state", True)]:
+                try: dcomp.set_editor_property(k, v)
+                except Exception: pass
+            drt = unreal.RenderingLibrary.create_render_target2d(dactor, cap_res, cap_res,
+                                                                 unreal.TextureRenderTargetFormat.RTF_RGBA32f)
+            dcomp.texture_target = drt
+            unreal.log(f"[ed] UE_DEPTH=1: depth SceneCapture2D armed (SCS_SCENE_DEPTH, RTF_RGBA32f, fov={hfov})")
+        except Exception as e:
+            unreal.log_error(f"[ed] UE_DEPTH setup FAILED ({e}) -- continuing RGB-only")
+            dactor = dcomp = drt = None
+
     if probe:
         poses = rig.orbit_hemisphere(focus, radius * 1.3, elevations_deg=(20.0, 45.0),
                                      n_azimuth=4, heldout_every=0)
@@ -220,7 +262,8 @@ def main():
     _S.update({"phase": "settle", "i": 0, "wait": int(os.environ.get("UE_SETTLE_TICKS", "600")),
                "poses": poses, "frames": [], "comp": comp, "rt": rt, "actor": actor, "world": world,
                "out_dir": out_dir, "caps": caps, "train_res": train_res, "hfov": hfov,
-               "focus": focus, "radius": radius})
+               "focus": focus, "radius": radius,
+               "dactor": dactor, "dcomp": dcomp, "drt": drt})
     _S["handle"] = unreal.register_slate_post_tick_callback(_tick)
     unreal.log(f"[ed] registered tick callback; {len(poses)} poses, settle {_S['wait']} ticks. "
                f"focus={focus} radius={radius/100:.1f}m res={cap_res} ev={ev}")
