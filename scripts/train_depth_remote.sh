@@ -21,8 +21,9 @@ echo "=== upload ==="
 SCP /tmp/ed_depth.tar.gz root@"$IP":/workspace/
 SCP scripts/pod_run_3dgs_depth.sh root@"$IP":/workspace/
 "${SSH[@]}" 'cd /workspace && tar --no-same-owner -xzf ed_depth.tar.gz && echo IMGS=$(ls ed/images|wc -l) DEPTHS=$(ls ed/depths|wc -l)'
-echo "=== launch depth-reg train ==="
-"${SSH[@]}" "cd /workspace && ITERS=$ITERS GRAD_THRESH=$GT DENSIFY_UNTIL=$DU nohup bash pod_run_3dgs_depth.sh > rund.log 2>&1 & echo STARTED pid \$!"
+echo "=== launch depth-reg train (depth_w ${DEPTH_W_INIT:-1.0}->${DEPTH_W_FINAL:-0.01}) ==="
+DWI="${DEPTH_W_INIT:-1.0}"; DWF="${DEPTH_W_FINAL:-0.01}"
+"${SSH[@]}" "cd /workspace && ITERS=$ITERS GRAD_THRESH=$GT DENSIFY_UNTIL=$DU DEPTH_W_INIT=$DWI DEPTH_W_FINAL=$DWF nohup bash pod_run_3dgs_depth.sh > rund.log 2>&1 & echo STARTED pid \$!"
 echo "=== poll ==="
 for i in {1..360}; do
   sleep 20

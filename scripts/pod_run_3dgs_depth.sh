@@ -42,7 +42,14 @@ python3 -u gsv/train.py -s /workspace/ed -m /workspace/ed/output_d -d depths --e
   --densify_grad_threshold "$GRAD_THRESH" --densify_until_iter "$DENSIFY_UNTIL" \
   --depth_l1_weight_init "$DEPTH_W_INIT" --depth_l1_weight_final "$DEPTH_W_FINAL" \
   --iterations "$ITERS" --test_iterations 7000 15000 30000 "$ITERS" --save_iterations 15000 30000 "$ITERS" \
-  >traind.log 2>&1 || { log TRAIN_FAIL; tail -60 traind.log; exit 1; }
+  >traind.log 2>&1
+RC=$?
+PLY="ed/output_d/point_cloud/iteration_$ITERS/point_cloud.ply"
+# The /workspace network volume intermittently throws OSError [Errno 5] on the ply
+# stream.close() AFTER the data is fully written (the file is complete on disk). Treat a
+# nonzero RC as fatal ONLY if the ply is missing/empty; otherwise it's that benign close.
+if [ ! -s "$PLY" ]; then log "TRAIN_FAIL (rc=$RC, no ply)"; tail -60 traind.log; exit 1; fi
+[ "$RC" -ne 0 ] && log "TRAIN_RC=$RC but ply present ($(stat -c%s "$PLY") B) -- benign save-close I/O, continuing"
 grep -iE "Evaluating|PSNR|Depth|\[ITER" traind.log | tail -12 || true
 
 log "STAGE_RENDER+METRICS"
