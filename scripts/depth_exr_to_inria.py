@@ -87,7 +87,13 @@ def main():
 
     z0, pick0, chans0 = sample
     pos = np.concatenate([d[d > 0] for d in invds]) if any((d > 0).any() for d in invds) else np.array([0.0])
-    invd_max = forced if forced else float(np.percentile(pos, 99.9))
+    # Robust INVD_MAX: p99.9 of inverse depth, but CAPPED so the implied min-depth >=
+    # DEPTH_MIN_FLOOR_M (default 1m). A few cameras buried in foliage/against geometry see
+    # surfaces at ~0.2m; without the cap those rare near pixels stretch the 16-bit range and
+    # rob precision from the real 1-90m scene. Capping clamps only those (~2-3%) to png max.
+    floor_m = float(os.environ.get("DEPTH_MIN_FLOOR_M", "1.0"))
+    auto = float(np.percentile(pos, 99.9))
+    invd_max = forced if forced else min(auto, 1.0 / floor_m)
     if invd_max <= 0:
         invd_max = 1.0
     print(f"channels={chans0} depth_channel={pick0}")
