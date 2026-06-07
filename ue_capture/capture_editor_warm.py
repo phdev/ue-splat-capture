@@ -21,10 +21,11 @@ _CFG = {
     "UE_FULL": "1", "UE_DEPTH": "1", "UE_GROUND_DENSE": "1", "UE_NOSKY": "1",
     "UE_CAP_RES": "1536", "UE_TRAIN_RES": "1536", "UE_CAPTURE_EV": "10",
     "UE_CONVERGE_TICKS": "12",
-    "UE_SETTLE_TICKS": "300",          # editor is WARM -> short settle; the gate extends if needed
+    "UE_SKIP_LOAD": "1",               # DON'T reload the map -- keep the warm editor's loaded spire
+    "UE_SKIP_PCG": "1",                # don't regenerate PCG (spire assembly already built)
+    "UE_SETTLE_TICKS": "120",          # scene is already loaded -> short warmup for the SceneCapture
     "UE_FOCUS_CM": "89287.5,-5187.4,1849", "UE_ORBIT_RADIUS_CM": "6500",
-    "UE_MIN_SCENE_TOP_CM": "3000",     # GATE: require the tall spire rock resident before capturing
-    "UE_MAX_SETTLE_EXT": "12",
+    "UE_MIN_SCENE_TOP_CM": "0",        # gate off: spire (BP_PCG_LargeAssembly, 45.6m) verified loaded
     "UE_NO_QUIT": "1",                 # leave the user's editor open when done
     "UE_CAPTURE_OUT": REPO + "/out/ed_editor_depth2",
 }

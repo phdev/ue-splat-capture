@@ -282,10 +282,17 @@ def main():
     caps = int(os.environ.get("UE_CAPS_PER_POSE", "3"))
     probe = os.environ.get("UE_PROBE", "0") == "1"
 
-    try:
-        unreal.EditorLoadingAndSavingUtils.load_map(LEVEL)
-    except Exception as e:
-        unreal.log_warning(f"[ed] load_map: {e}")
+    # UE_SKIP_LOAD=1 (warm-editor capture): DON'T reload the map -- the user's open editor
+    # already has the level + the PCG-generated spire (BP_PCG_LargeAssembly) built; a reload
+    # would un-generate it (the spire only appears after PCG runs, which a fresh launch doesn't
+    # reliably do). Use the currently-open world instead.
+    if os.environ.get("UE_SKIP_LOAD") == "1":
+        unreal.log("[ed] UE_SKIP_LOAD=1 -> using already-open level (warm editor)")
+    else:
+        try:
+            unreal.EditorLoadingAndSavingUtils.load_map(LEVEL)
+        except Exception as e:
+            unreal.log_warning(f"[ed] load_map: {e}")
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
 
     focus = [float(x) for x in os.environ["UE_FOCUS_CM"].split(",")] if os.environ.get("UE_FOCUS_CM") \
@@ -324,12 +331,17 @@ def main():
     top0, nt0, nm0 = _scene_top(unreal, focus, radius * 1.5)
     unreal.log(f"[ed] WP: pinned {ng} descriptors; reran construction on {kc} actors; "
                f"initial rock_top={top0:.0f}cm ({nt0} rocks; tallest='{nm0}')")
-    try:
-        for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors():
-            pcg = a.get_component_by_class(unreal.PCGComponent)
-            if pcg: pcg.generate_local(True)
-    except Exception as e:
-        unreal.log_warning(f"[ed] PCG: {e}")
+    # UE_SKIP_PCG=1 (warm editor): the spire assembly + foliage are already generated; don't
+    # re-run generate_local (it could disturb the loaded assembly). Otherwise generate PCG.
+    if os.environ.get("UE_SKIP_PCG") == "1":
+        unreal.log("[ed] UE_SKIP_PCG=1 -> not regenerating PCG (warm editor already has it)")
+    else:
+        try:
+            for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors():
+                pcg = a.get_component_by_class(unreal.PCGComponent)
+                if pcg: pcg.generate_local(True)
+        except Exception as e:
+            unreal.log_warning(f"[ed] PCG: {e}")
 
     actor = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).spawn_actor_from_class(
         unreal.SceneCapture2D, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
