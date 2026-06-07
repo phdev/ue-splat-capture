@@ -125,6 +125,51 @@ def _dump_scene(unreal, focus):
         unreal.log(f"[ed] DUMP named-rock: '{lbl}' ({cls}) top={top:.0f}cm dist={d:.0f}cm")
 
 
+def _apply_show_only(unreal, comp, mesh_keywords, foliage_blocklist, include_classes=()):
+    """MESH-NAME-FILTERED show-only: render only StaticMesh primitives whose mesh name
+    contains a terrain keyword (Boulder/Cliff/Embankment/.../Rock) and NOT a foliage
+    blocklist substring. Walks ALL actors, ALL StaticMeshComponents (including ISMCs
+    inside PCG BPs which mix terrain + foliage in the same actor). Also unconditionally
+    includes any component on actors whose class matches include_classes (e.g. Landscape).
+    The actor-level allow ('Rock_*_BP' etc.) was inadequate -- PCGDemo_DitchBP holds 4500
+    SM_ForestGround_01 (terrain) AND 2300 SM_Amaryllis_04 (foliage) in the same actor.
+    Returns (n_components_added, [sample_mesh_names])."""
+    try:
+        comp.primitive_render_mode = unreal.SceneCapturePrimitiveRenderMode.PRM_USE_SHOW_ONLY_LIST
+    except Exception as e:
+        unreal.log_warning(f"[ed] show-only set mode failed: {e}")
+        return 0, []
+    w = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+    try:
+        acts = unreal.GameplayStatics.get_all_actors_of_class(w, unreal.Actor)
+    except Exception:
+        acts = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    n_comp = 0; samples = []
+    for a in acts:
+        try:
+            cls = a.get_class().get_name()
+            # Unconditional include for whole actor (e.g., Landscape)
+            if any(s in cls for s in include_classes):
+                for c in a.get_components_by_class(unreal.PrimitiveComponent):
+                    try: comp.show_only_component(c); n_comp += 1
+                    except Exception: pass
+                continue
+            # Otherwise walk StaticMeshComponents (incl. ISMCs) and filter by mesh name
+            for c in a.get_components_by_class(unreal.StaticMeshComponent):
+                try:
+                    sm = c.get_editor_property("static_mesh")
+                    if not sm: continue
+                    mn = sm.get_name()
+                    if any(b in mn for b in foliage_blocklist): continue
+                    if not any(k in mn for k in mesh_keywords): continue
+                    comp.show_only_component(c); n_comp += 1
+                    if len(samples) < 10 and mn not in samples: samples.append(mn)
+                except Exception: pass
+        except Exception:
+            pass
+    return n_comp, samples
+
+
 def _rerun_construction(unreal, focus, radius):
     """Re-run Blueprint construction scripts on actors near the focus. The hero rock is a
     Rock_*_BP whose mesh is ASSIGNED in its construction script; when WP loads the actor
@@ -371,6 +416,22 @@ def main():
                                                         unreal.TextureRenderTargetFormat.RTF_RGBA8)
     comp.texture_target = rt
 
+    # UE_SHOW_ONLY=1 (NUCLEAR ground-only mode): MESH-NAME filter -- render only terrain
+    # mesh instances, skip foliage. The PCGDemo BPs (DitchBP/GroundBP) mix terrain meshes
+    # (Boulder/Cliff/Embankment/RockFormation/ForestGround/...) with foliage meshes
+    # (MoneyPlant/Elderberry/Fern/...) IN THE SAME ACTOR, so actor-level filtering can't
+    # separate them. Per-mesh-name does. Pairs with a foliage-on capture (scene21); the
+    # merge gives the trainer ground supervision under what was previously canopy occlusion.
+    if os.environ.get("UE_SHOW_ONLY") == "1":
+        terrain_kw = tuple(os.environ.get("UE_TERRAIN_KEYWORDS",
+            "Boulder,Cliff,Embankment,Beach,Pebbles,Stones,Formation,Rocky,Rock,ForestGround,ForestTerrain,Sandstone").split(","))
+        foliage_block = tuple(os.environ.get("UE_FOLIAGE_BLOCK",
+            "Plant,Grass,Fern,Ivy,Leaves,Berry,Archangel,Ginger,Periwinkle,Castor,Clover,Palm,Kikuyu,Arrow,Branch,Roots,Sphere,Icon,Cordyline,Amaryllis,Oak,Cover,WaterPlane,Money,YellowArch").split(","))
+        incl_classes = tuple(os.environ.get("UE_SHOW_ONLY_CLASSES", "Landscape").split(","))
+        nc, samples = _apply_show_only(unreal, comp, terrain_kw, foliage_block, incl_classes)
+        unreal.log(f"[ed] UE_SHOW_ONLY=1 (RGB, mesh-filter): {nc} primitives kept "
+                   f"(terrain={terrain_kw[:6]}+...); sample_meshes={samples[:6]}")
+
     # Optional GT metric-depth capture (UE_DEPTH=1): a SECOND SceneCapture2D bound to the
     # SAME view each pose, SCS_SCENE_DEPTH -> FLOAT RT (RTF_RGBA32f) -> EXR. SCS_SceneDepth
     # is LINEAR depth in world units (cm); a 32f RT keeps full precision (16f loses it past
@@ -404,6 +465,15 @@ def main():
             drt = unreal.RenderingLibrary.create_render_target2d(dactor, cap_res, cap_res, fmt)
             dcomp.texture_target = drt
             unreal.log(f"[ed] UE_DEPTH=1: depth SceneCapture2D armed (SCS_SCENE_DEPTH, {fmtname}, fov={hfov})")
+            # mirror the show-only allowlist onto the depth capture so it matches RGB
+            if os.environ.get("UE_SHOW_ONLY") == "1":
+                tkw = tuple(os.environ.get("UE_TERRAIN_KEYWORDS",
+                    "Boulder,Cliff,Embankment,Beach,Pebbles,Stones,Formation,Rocky,Rock,ForestGround,ForestTerrain,Sandstone").split(","))
+                fbl = tuple(os.environ.get("UE_FOLIAGE_BLOCK",
+                    "Plant,Grass,Fern,Ivy,Leaves,Berry,Archangel,Ginger,Periwinkle,Castor,Clover,Palm,Kikuyu,Arrow,Branch,Roots,Sphere,Icon,Cordyline,Amaryllis,Oak,Cover,WaterPlane,Money,YellowArch").split(","))
+                icl = tuple(os.environ.get("UE_SHOW_ONLY_CLASSES", "Landscape").split(","))
+                ndc, _ = _apply_show_only(unreal, dcomp, tkw, fbl, icl)
+                unreal.log(f"[ed] UE_SHOW_ONLY=1 (depth, mesh-filter): {ndc} primitives kept")
         except Exception as e:
             unreal.log_error(f"[ed] UE_DEPTH setup FAILED ({e}) -- continuing RGB-only")
             dactor = dcomp = drt = None
