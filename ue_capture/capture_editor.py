@@ -484,6 +484,25 @@ def main():
         pelev = tuple(float(x) for x in os.environ.get("UE_PROBE_ELEV", "8,22").split(","))
         poses = rig.orbit_hemisphere(focus, radius * 1.6, elevations_deg=pelev,
                                      n_azimuth=int(os.environ.get("UE_PROBE_NAZ", "8")), heldout_every=0)
+    elif os.environ.get("UE_SPIRE_ORBIT") == "1":
+        # TIGHT orbit around the SPIRE (BP_PCG_LargeAssembly at ~(90250, -4360, ~3700)),
+        # NOT the focus. Dome cameras orbit around focus; the spire is 12-14m east+north of
+        # focus, so dome cameras see only its front -> back of spire is uncovered (visible
+        # as a void from above). This pass orbits the spire directly to fill that gap.
+        # UE_SPIRE_CENTER_CM=x,y,z overrides the default spire location.
+        sc = os.environ.get("UE_SPIRE_CENTER_CM")
+        if sc:
+            sx, sy, sz = [float(v) for v in sc.split(",")]
+        else:
+            sx, sy, sz = 90250.0, -4360.0, 3700.0
+        elev = tuple(float(v) for v in os.environ.get("UE_SPIRE_ELEV", "-5,15,35,55").split(","))
+        radius_cm = float(os.environ.get("UE_SPIRE_RADIUS_CM", "2000"))
+        naz = int(os.environ.get("UE_SPIRE_NAZ", "24"))
+        poses = list(rig.orbit_hemisphere([sx, sy, sz], radius_cm, elevations_deg=elev,
+                                          n_azimuth=naz, heldout_every=6))
+        for i, p in enumerate(poses): p["index"] = i
+        unreal.log(f"[ed] SPIRE_ORBIT: center=({sx:.0f},{sy:.0f},{sz:.0f}) r={radius_cm/100:.0f}m "
+                   f"elev={elev} n_az={naz} -> {len(poses)} poses")
     elif os.environ.get("UE_FULL") == "1":
         # FULL-COVERAGE of the whole ~45m-radius terrain ISLAND (the extent probe showed a
         # finite ~90m patch; the first scene16 only reached ~25m -> floating-island edge).

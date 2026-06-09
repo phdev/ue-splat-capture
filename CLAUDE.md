@@ -447,9 +447,55 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   matched orbit poses at scene16's target. rm the qa* pose dirs before the Pages commit.
 - **Deploy:** `out/site/` is its OWN git repo (`phdev/electric-dreams-splat`, the Pages
   site) — commit+push there to deploy (the code repo is `phdev/ue-splat-capture`; `out/` is
-  gitignored in it). **scene18** (gap-filled vanilla) is the default; dropdown keeps scene16
-  (brush, soft) for A/B. BUMP the SOG filename each deploy (scene17→scene18) so the Pages CDN
+  gitignored in it). BUMP the SOG filename each deploy (scene17→scene18→…) so the Pages CDN
   + browser cache miss — the user sees the change without a manual hard-refresh of the SOG.
+  Run `python3 scripts/test_viewer_consistency.py` BEFORE every Pages commit — it catches
+  deployed-but-not-in-dropdown sogs, dangling SCENES entries, and default/label drift (this
+  class of bug shipped scene25 invisible and orphaned scene17 for days).
+
+## LAYERED splats: the scene25/26 recipe (multi-pass concat — what works and what doesn't)
+The current LIVE default (**scene26**, 2.18M gauss) is a CONCAT of three independently
+trained splats, not one training run. Key findings, learned expensively (scenes 19-26):
+- **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
+  `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
+  (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
+  actor + every SceneComponent visible/not-hidden) + verify instance counts (~49.5K when
+  fully loaded, 738 ISMs) BEFORE any capture. "Streaming Disabled" badge / "No loaded
+  region" → WP not streaming; force-load via `WorldPartitionBlueprintLibrary.get_actor_descs
+  → load_actors + pin_actors` + move the viewport near the scene (it's the streaming source).
+- **Joint training of mixed passes FAILS.** Duplicate poses with conflicting content
+  (foliage-on RGB + foliage-off RGB at the same camera) → optimizer averages → severe
+  under-densification (scene22/23: 263-735K vs the 1.5M+ healthy runs) + PSNR=inf data leak
+  in eval. Split poses (on for dome, off for nadir) ALSO fails — still geometrically
+  contradictory along shared sightlines (PSNR ~15-17). Mixed-EV joint training fails the
+  same way (v3: EV=10 dome + EV=12 spire orbit → 591K mush).
+- **The recipe that WORKS: train each internally-consistent pass STANDALONE, then concat
+  the gaussian arrays + spatial dedup.** `np.concatenate` of the raw ply rows (same 62-prop
+  layout) is a valid splat; alpha-blending handles overlap. Dedup: kdtree on the base layer,
+  drop added gaussians with a base neighbor within 0.5m (0.35m for dense close-orbit
+  layers) — ~89% of a foliage-off layer dropped as redundant; the survivors are exactly the
+  under-canopy/gap content. Clean AFTER concat with the tight knobs (`0.4 5 2.0 0.18 0.03
+  <box> 1.0 1.0 0.8 16 0`) and compute the crop box from the BASE layer's median (a
+  close-orbit layer skews the combined median → box clips the island edge).
+- **Hero-feature gaps (back of the spire) = orbit the FEATURE, not the focus.**
+  `UE_SPIRE_ORBIT=1` rig (UE_SPIRE_CENTER_CM/RADIUS_CM/ELEV/NAZ) orbits a named point;
+  dome orbits around the scene focus only see the focus-facing side of off-center features.
+  Train the orbit standalone (192 poses → 5.3M gauss of fine detail), crop to the feature
+  neighborhood (±25m of its own median), dedup vs base, and filter the ADDS only:
+  blue-dominance (b>r+0.06 & b>g+0.06 — vegetation/rock is never blue-dominant) + glint
+  (sat>0.6&val>0.6) + adds-only SOR (0.4m/k16). Per-layer filtering is safe where the
+  island-wide glint filter would eat stylized terrain.
+- **EV reminder (bit us AGAIN):** higher pinned `auto_exposure_*_brightness` = DARKER.
+  EV=12 intending "brighter shadows" actually darkened the shadowed back ~20%.
+- **Runpod ops:** pods are flaky — one died mid-train (H100 eviction), one sat 40min in
+  pip (lemon). Detach with `setsid … < /dev/null & disown` (plain `nohup &` dies with the
+  SSH session). Monitor the STAGE line + `ps | grep train.py` + checkpoint dir, not
+  `tail -1` (pip notices mask the stage). Save checkpoints at 3000/7000/15000/30000 and
+  opportunistically download EVERY new checkpoint mid-train so a pod death loses minutes,
+  not the run. Upload to /root (local disk) NOT /workspace (MooseFS network mount — slow,
+  corrupts big scp). JPEG-pack images (q92) before tar: 2.5GB PNG → 0.6GB, loader-compatible
+  (update images.txt .png→.jpg; read-then-write, the chained one-liner truncates to 0 bytes).
+  EVAL_FLAG uses `${EVAL_FLAG-default}` (NOT `:-`) so empty string means "skip eval".
 
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed

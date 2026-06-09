@@ -37,11 +37,14 @@ log "DATASET imgs=$NIMG depths=$NDEP depth_params=$HASPARAMS iters=$ITERS (vanil
 [ "$NDEP" -gt 0 ] || { log NO_DEPTHS; exit 1; }
 [ "$HASPARAMS" = "yes" ] || { log NO_DEPTH_PARAMS; exit 1; }
 
-log "STAGE_TRAIN (depth-reg: -d depths, w $DEPTH_W_INIT->$DEPTH_W_FINAL)"
-python3 -u gsv/train.py -s /workspace/ed -m /workspace/ed/output_d -d depths --eval --data_device cpu \
+RES_FACTOR="${RES_FACTOR:-1}"     # set RES_FACTOR=2 to halve resolution (1536->768) for memory
+EVAL_FLAG="${EVAL_FLAG-"--eval"}"   # NOTE: `-` (NOT `:-`) means default only if UNSET; empty string == "skip eval"
+log "STAGE_TRAIN (depth-reg: -d depths, w $DEPTH_W_INIT->$DEPTH_W_FINAL, -r $RES_FACTOR, eval='$EVAL_FLAG')"
+python3 -u gsv/train.py -s /workspace/ed -m /workspace/ed/output_d -d depths $EVAL_FLAG --data_device cpu \
+  -r "$RES_FACTOR" \
   --densify_grad_threshold "$GRAD_THRESH" --densify_until_iter "$DENSIFY_UNTIL" \
   --depth_l1_weight_init "$DEPTH_W_INIT" --depth_l1_weight_final "$DEPTH_W_FINAL" \
-  --iterations "$ITERS" --test_iterations 7000 15000 30000 "$ITERS" --save_iterations 15000 30000 "$ITERS" \
+  --iterations "$ITERS" --test_iterations 3000 7000 15000 30000 "$ITERS" --save_iterations 3000 7000 15000 30000 "$ITERS" \
   >traind.log 2>&1
 RC=$?
 PLY="ed/output_d/point_cloud/iteration_$ITERS/point_cloud.ply"
