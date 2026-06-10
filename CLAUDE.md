@@ -459,10 +459,10 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-30 recipes (what works and what doesn't)
-The current LIVE default is **scene30** (1.63M gauss, 20.7MB): the scene29 fill-light
-recipe EXTENDED with base-band floods + a close orbit (see BLACK-ON-BLACK and BASE-BAND
-below) + foliage-off concat. Key findings, learned expensively (scenes 19-30):
+## LAYERED splats: the scene25-31 recipes (what works and what doesn't)
+The current LIVE default is **scene31** (1.51M gauss, 19.3MB): the scene30 capture
+(fill v4 + close orbit) retrained ALPHA-SEALED (random-bg GT compositing) and shipped
+with NO island-wide despike — see the three bullets below. Key findings (scenes 19-31):
 - **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
   `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
   (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
@@ -516,6 +516,33 @@ below) + foliage-off concat. Key findings, learned expensively (scenes 19-30):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **TRANSPARENT HOLES: measure with the BG-FLIP SCANNER, never by eyeballing poses
+  (scene31's gate, now permanent).** `scripts/hole_scan.sh <sog> <dir>` renders 42 spire
+  poses (out/site/q31scan/: 12 az x 3 heights x R14 + 6 x R25) twice each — magenta vs
+  green viewer background — and `scripts/analyze_holes.py` counts pixels that CHANGE
+  (= transparency): border-connected changed = true background, interior changed islands
+  = holes. Zero false positives from dark-but-opaque rock; AA specks <4px dropped.
+  Shipped scene30 measured 519K hole px across ALL 42 views (user was right). Run this
+  gate BEFORE every deploy; judge residuals by the viz overlays — red on the COLUMN BODY
+  = defect; red clusters at vegetation silhouettes = real gaps between leaves (faithful).
+- **DESPIKE DESTROYS THE SPIRE SHELL — ship the raw concat (scene31).** Measured:
+  full clean 519K hole px, faint-kill-off variant 505K, NO despike 163K. The SPIKE stage
+  (len>0.4 ratio>5) strips the elongated gaussians that plaster rock faces/moss — they
+  ARE the shell. (scene17/18 lesson, now with numbers and the guilty stage identified.)
+  The concat's per-layer filters (blue/glint/adds-SOR) are enough; with alpha-sealed
+  training (below) even floaters don't need the island-wide despike — island view clean.
+- **ALPHA-SEALED training: composite GT over per-iteration random bg (scene31).**
+  Against a pure-black NOSKY background, transparency costs the optimizer nothing — the
+  trained shell leaks even with perfect coverage+lighting. Fix the OBJECTIVE:
+  `scripts/pod_patch_alpha.py` (run on the pod after clone+pip, before train) builds
+  exact bg masks from the GT inverse-depth pngs (bg == EXACTLY 0 — verified across all
+  802 frames) and patches gsv/train.py so GT is composited over the SAME random bg color
+  the render uses each iteration (train with `--random_background`). Any see-through
+  pixel inside the silhouette then flickers vs GT -> crushed. Result: shipped-scene30
+  519K -> scene31 145K hole px, residual all at vegetation silhouettes (real gaps), rock
+  column watertight in every view; ALSO suppresses floaters/fog (a floater over bg
+  flickers too), which is what makes no-despike shippable. Verify the patch took:
+  "[alpha-patch] loaded 802 bg masks" in the train log at iter 0.
 - **BASE-BAND mush at close range = TERRAIN-shadowed undergrowth + no close views
   (scene30, the current best & live default).** scene29 fixed the column but its BASE
   still dissolved into dark see-through mush in the user's close-up (pose HUD made the
