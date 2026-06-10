@@ -18,6 +18,7 @@ GRAD_THRESH="${GRAD_THRESH:-0.00013}"
 DENSIFY_UNTIL="${DENSIFY_UNTIL:-20000}"
 DEPTH_W_INIT="${DEPTH_W_INIT:-1.0}"        # Inria defaults: init 1.0 -> final 0.01 (exp decay)
 DEPTH_W_FINAL="${DEPTH_W_FINAL:-0.01}"
+OPAC_RESET="${OPAC_RESET:-3000}"   # opacity_reset_interval; set >= ITERS to never reset (dark-surface survival)
 log(){ echo "[$(date +%H:%M:%S)] $*"; }
 
 log "STAGE_CLONE"
@@ -44,6 +45,7 @@ python3 -u gsv/train.py -s /workspace/ed -m /workspace/ed/output_d -d depths $EV
   -r "$RES_FACTOR" \
   --densify_grad_threshold "$GRAD_THRESH" --densify_until_iter "$DENSIFY_UNTIL" \
   --depth_l1_weight_init "$DEPTH_W_INIT" --depth_l1_weight_final "$DEPTH_W_FINAL" \
+  --opacity_reset_interval "$OPAC_RESET" \
   --iterations "$ITERS" --test_iterations 3000 7000 15000 30000 "$ITERS" --save_iterations 3000 7000 15000 30000 "$ITERS" \
   >traind.log 2>&1
 RC=$?
