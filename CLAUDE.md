@@ -477,6 +477,17 @@ trained splats, not one training run. Key findings, learned expensively (scenes 
   under-canopy/gap content. Clean AFTER concat with the tight knobs (`0.4 5 2.0 0.18 0.03
   <box> 1.0 1.0 0.8 16 0`) and compute the crop box from the BASE layer's median (a
   close-orbit layer skews the combined median → box clips the island edge).
+- **VIEW-STARVED layers are a DEAD END — retrain unified instead (scene28, the current best).**
+  scene27's newest-wins repair regressed: a layer trained from only ~96 close views renders
+  as smeared floaters from every OTHER angle (free space is unconstrained), and point-stat
+  filters (SOR/color) cannot detect view-inconsistency. THE FIX: fold the new views into ONE
+  unified retrain of the whole pass (562 island + 96 spire-mid + 96 base orbit = 754 views,
+  ALL EV-10; exclude mixed-EV sets) — multi-view gradients prune junk globally. This is NOT
+  the joint-training failure mode (that was contradictory content / mixed EV); same-content
+  same-EV more-views is just better coverage. scene28: back face textured (was smudge), zero
+  floaters, 920K/11MB (half of scene26 — better iPhone framerate). Layer-concat remains valid
+  ONLY for the foliage-off under-canopy fill (oldest-wins 0.5m) — content invisible to the
+  main pass, so view-consistency never fights it.
 - **REPAIR layers need NEWEST-WINS, not dedup (scene27; `scripts/concat_layers.py --repair`).**
   Oldest-wins dedup keeps the OLD fat dark smudge and drops the NEW crisp re-shoot — a
   base-of-spire repair layer contributed only 26K/668K gaussians until flipped. In the
