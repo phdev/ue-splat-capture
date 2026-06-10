@@ -453,9 +453,10 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   deployed-but-not-in-dropdown sogs, dangling SCENES entries, and default/label drift (this
   class of bug shipped scene25 invisible and orphaned scene17 for days).
 
-## LAYERED splats: the scene25/26 recipe (multi-pass concat — what works and what doesn't)
-The current LIVE default (**scene26**, 2.18M gauss) is a CONCAT of three independently
-trained splats, not one training run. Key findings, learned expensively (scenes 19-26):
+## LAYERED splats: the scene25-29 recipes (what works and what doesn't)
+The current LIVE default is **scene29** (1.58M gauss, 19.3MB): a fill-light unified
+754-view retrain (see BLACK-ON-BLACK below) + foliage-off concat. Key findings, learned
+expensively (scenes 19-29):
 - **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
   `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
   (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
@@ -477,7 +478,7 @@ trained splats, not one training run. Key findings, learned expensively (scenes 
   under-canopy/gap content. Clean AFTER concat with the tight knobs (`0.4 5 2.0 0.18 0.03
   <box> 1.0 1.0 0.8 16 0`) and compute the crop box from the BASE layer's median (a
   close-orbit layer skews the combined median → box clips the island edge).
-- **VIEW-STARVED layers are a DEAD END — retrain unified instead (scene28, the current best).**
+- **VIEW-STARVED layers are a DEAD END — retrain unified instead (scene28).**
   scene27's newest-wins repair regressed: a layer trained from only ~96 close views renders
   as smeared floaters from every OTHER angle (free space is unconstrained), and point-stat
   filters (SOR/color) cannot detect view-inconsistency. THE FIX: fold the new views into ONE
@@ -488,6 +489,27 @@ trained splats, not one training run. Key findings, learned expensively (scenes 
   floaters, 920K/11MB (half of scene26 — better iPhone framerate). Layer-concat remains valid
   ONLY for the foliage-off under-canopy fill (oldest-wins 0.5m) — content invisible to the
   main pass, so view-consistency never fights it.
+- **BLACK-ON-BLACK surfaces get DELETED by training — fix the DATA with fill lights
+  (scene29, the current best & live default).** scene28's back-of-spire stayed translucent:
+  the shadowed face reads ~0.04 luminance against the pure-black UE_NOSKY background, so
+  photometrically "surface" ≈ "nothing" and the optimizer is free to delete it (measured
+  4.4× fewer gaussians back vs front; every 3000-iter opacity reset re-crushes the faint
+  survivors). POST-PROCESSING CANNOT FIX THIS — a week of scene29a–e attempts proved it:
+  no-reset training (OPAC_RESET≥ITERS) saves the face (op p50 0.30→0.45) but grows
+  white+black fog blobs that survive signature strips, depth-truth culling (project
+  centers into N GT-depth views, cull if ≥1.5m in front in ≥2 views — a valid tool, kept
+  in the toolbox) and proportional scale clamps (smax>0.8m); the surviving fog renders as
+  smear from every back azimuth. THE FIX (one shot, worked first try): light the face IN
+  THE SCENE so capture sees it — `scripts/ue_add_fill_lights.py` via
+  `scripts/ue_exec.py` (remote-exec client) adds 4 spotlights = 2 azimuth columns
+  straddling the anti-sun direction (sun yaw ±45°) × 2 heights, R=14m, **2.5M cd**
+  (300K cd is INVISIBLE at pinned-EV10 exposure calibrated for the 100k-lux sun; tune by
+  measuring a probe orbit: back-face p50 0.04→0.08-0.15, p90 ~0.5), cast_shadows ON (the
+  sunlit front stays byte-identical), specular 0.25. Fill is scene-consistent across all
+  754 views (per-camera EV tricks are not), so it trains clean with DEFAULT opacity
+  resets — resets kill fog, and the now-visible face survives them. Validate with an
+  8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
+  solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
 - **REPAIR layers need NEWEST-WINS, not dedup (scene27; `scripts/concat_layers.py --repair`).**
   Oldest-wins dedup keeps the OLD fat dark smudge and drops the NEW crisp re-shoot — a
   base-of-spire repair layer contributed only 26K/668K gaussians until flipped. In the
@@ -516,6 +538,14 @@ trained splats, not one training run. Key findings, learned expensively (scenes 
   corrupts big scp). JPEG-pack images (q92) before tar: 2.5GB PNG → 0.6GB, loader-compatible
   (update images.txt .png→.jpg; read-then-write, the chained one-liner truncates to 0 bytes).
   EVAL_FLAG uses `${EVAL_FLAG-default}` (NOT `:-`) so empty string means "skip eval".
+  **Pod RESTART resets the container layer** (volume /workspace survives, apt installs do
+  NOT): after an eviction+start cycle, runtime-installed rsync is gone → instant
+  "unexpected end of file" (remote exit 127) that looks like a network error — and a retry
+  loop that restarts the pod re-wipes it every time. For bulk downloads off a flaky pod:
+  `split -b 64m` on the pod + per-chunk scp with retry + md5 check + `cat` reassembly
+  (scp is preinstalled, chunks make progress durable). gzip on a 3DGS ply saves only ~10%
+  (high-entropy floats) — not worth it; chunking is the win. Any mid-monitor insurance
+  scp MUST carry a `timeout` or a stalled transfer silently blocks the whole monitor loop.
 
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed
