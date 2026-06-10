@@ -477,6 +477,15 @@ trained splats, not one training run. Key findings, learned expensively (scenes 
   under-canopy/gap content. Clean AFTER concat with the tight knobs (`0.4 5 2.0 0.18 0.03
   <box> 1.0 1.0 0.8 16 0`) and compute the crop box from the BASE layer's median (a
   close-orbit layer skews the combined median → box clips the island edge).
+- **REPAIR layers need NEWEST-WINS, not dedup (scene27; `scripts/concat_layers.py --repair`).**
+  Oldest-wins dedup keeps the OLD fat dark smudge and drops the NEW crisp re-shoot — a
+  base-of-spire repair layer contributed only 26K/668K gaussians until flipped. In the
+  repair zone (back half-plane of the feature, self-calibrated from layer medians — the
+  ingest FLIPS Y vs UE world, never hand-type world coords), delete existing gaussians
+  within 0.4m of new content and insert the new layer wholesale; oldest-wins outside.
+  Also: re-shoot the GAP'S elevation band — spire-orbit elevations 10-80° never saw the
+  LOWER back face; the repair orbit centered at the BASE (z=25m) with elev -10/5/20 did.
+  Recenter every release by the PRIOR release's median so camera jsons keep framing.
 - **Hero-feature gaps (back of the spire) = orbit the FEATURE, not the focus.**
   `UE_SPIRE_ORBIT=1` rig (UE_SPIRE_CENTER_CM/RADIUS_CM/ELEV/NAZ) orbits a named point;
   dome orbits around the scene focus only see the focus-facing side of off-center features.
