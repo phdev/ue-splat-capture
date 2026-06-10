@@ -452,11 +452,17 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   Run `python3 scripts/test_viewer_consistency.py` BEFORE every Pages commit — it catches
   deployed-but-not-in-dropdown sogs, dangling SCENES entries, and default/label drift (this
   class of bug shipped scene25 invisible and orphaned scene17 for days).
+- **Pose HUD (gap reporting):** the viewer shows `tgt x,y,z · ang pitch,yaw · d R`
+  bottom-left (always on). A user screenshot of a problem view carries its exact orbit
+  camera; rebuild it locally via `window.setCameraState({position:tgt, angles:[p,y,0],
+  distance:d})` or write a settings json with that camera. Enabled by an index.js patch
+  (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
+  index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-29 recipes (what works and what doesn't)
-The current LIVE default is **scene29** (1.58M gauss, 19.3MB): a fill-light unified
-754-view retrain (see BLACK-ON-BLACK below) + foliage-off concat. Key findings, learned
-expensively (scenes 19-29):
+## LAYERED splats: the scene25-30 recipes (what works and what doesn't)
+The current LIVE default is **scene30** (1.63M gauss, 20.7MB): the scene29 fill-light
+recipe EXTENDED with base-band floods + a close orbit (see BLACK-ON-BLACK and BASE-BAND
+below) + foliage-off concat. Key findings, learned expensively (scenes 19-30):
 - **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
   `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
   (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
@@ -490,7 +496,7 @@ expensively (scenes 19-29):
   ONLY for the foliage-off under-canopy fill (oldest-wins 0.5m) — content invisible to the
   main pass, so view-consistency never fights it.
 - **BLACK-ON-BLACK surfaces get DELETED by training — fix the DATA with fill lights
-  (scene29, the current best & live default).** scene28's back-of-spire stayed translucent:
+  (scene29; extended by scene30).** scene28's back-of-spire stayed translucent:
   the shadowed face reads ~0.04 luminance against the pure-black UE_NOSKY background, so
   photometrically "surface" ≈ "nothing" and the optimizer is free to delete it (measured
   4.4× fewer gaussians back vs front; every 3000-iter opacity reset re-crushes the faint
@@ -510,6 +516,23 @@ expensively (scenes 19-29):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **BASE-BAND mush at close range = TERRAIN-shadowed undergrowth + no close views
+  (scene30, the current best & live default).** scene29 fixed the column but its BASE
+  still dissolved into dark see-through mush in the user's close-up (pose HUD made the
+  exact view reproducible). Measured: the bush band wrapping the column base is
+  terrain-shadowed on EVERY azimuth — bottom-third p50 0.04-0.10 even on the SUN side —
+  so it was black-on-black all around; and the closest orbit (R17m) gave no close-range
+  supervision (an R12m probe sat INSIDE the bushes — frames of unlit leaf undersides,
+  useless). Fix (fill v4, in `scripts/ue_add_fill_lights.py`): keep the 4 column spots,
+  add **4 down-angled floods at 90° spacing** (z34m → aim z19m, 3M cd, cone 65°) so the
+  bush band reads as top-lit foliage from every side (probe: worst az 0.035 → 0.17+;
+  one azimuth stuck at 0.08 from bush self-occlusion — more candela does NOT fix
+  occlusion, accepted), plus a **48-pose close orbit** (R15m — just OUTSIDE the bush
+  mass, center z24m, elev -5/10) so close-range gaussians densify fine. Probe the band
+  with an 8-pose orbit BEFORE the 1h capture; verify the orbit radius is outside the
+  vegetation by LOOKING at a probe frame. 802-pose capture (562 island + 96 mid + 96
+  base + 48 close, prefixes cam_/sp_/sp3_/sp4_) → scene30: base solid at the user's
+  angle, island/back unchanged. QA poses live in out/site/q30/ (close_a/b/c, wide_low).
 - **REPAIR layers need NEWEST-WINS, not dedup (scene27; `scripts/concat_layers.py --repair`).**
   Oldest-wins dedup keeps the OLD fat dark smudge and drops the NEW crisp re-shoot — a
   base-of-spire repair layer contributed only 26K/668K gaussians until flipped. In the
@@ -543,9 +566,22 @@ expensively (scenes 19-29):
   "unexpected end of file" (remote exit 127) that looks like a network error — and a retry
   loop that restarts the pod re-wipes it every time. For bulk downloads off a flaky pod:
   `split -b 64m` on the pod + per-chunk scp with retry + md5 check + `cat` reassembly
-  (scp is preinstalled, chunks make progress durable). gzip on a 3DGS ply saves only ~10%
-  (high-entropy floats) — not worth it; chunking is the win. Any mid-monitor insurance
-  scp MUST carry a `timeout` or a stalled transfer silently blocks the whole monitor loop.
+  (scp is preinstalled, chunks make progress durable); pull chunks in PARALLEL (6
+  background scps) — ~4× faster than serial on the flaky long-RTT paths. gzip on a 3DGS
+  ply saves only ~10% (high-entropy floats) — not worth it; chunking is the win. Any
+  mid-monitor insurance scp MUST carry a `timeout` or a stalled transfer silently blocks
+  the whole monitor loop. **More pod landmines (scene30 burned ~1.5h):** (a) 4090-class
+  pods cgroup-OOM-kill (rc=137) the vanilla-3DGS camera load at ~32GB — 800+ imgs @1536
+  with `--data_device cpu` needs ~35GB; use an A100 box AND prefer `--data_device cuda`
+  (data fits easily in 80GB VRAM and skips the CPU page-in storm that crawls the first
+  ~10 min at 1.4s/it before settling). (b) `pkill -f train.py` over ssh MATCHES THE SSH
+  COMMAND ITSELF (the remote bash -c cmdline contains the pattern) — it kills its own
+  shell before any relaunch runs, AND the SIGTERM queued on a D-state python lands
+  MINUTES later when it leaves disk-sleep, killing the run you thought had survived
+  (rc=143). Kill by exact PID, or pattern like `[t]rain.py` via pgrep first. (c) The
+  monitor's proc-dead check must EXEMPT STAGE_CLONE/STAGE_PIP — train.py legitimately
+  isn't running there, and a slow-GitHub pod can sit in clone >12 min (it killed a
+  healthy run's monitor once).
 
 ## Reproducibility
 Fixed seeds (rig, init, optim, densify RNG), deterministic ordering, committed

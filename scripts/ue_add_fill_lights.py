@@ -1,4 +1,4 @@
-"""Add (or remove) the spire back-face FILL lights in the warm editor — the scene29 fix.
+"""Add (or remove) the spire FILL light rig in the warm editor — scene29/30 fix (v4).
 
 Run via:  python3 scripts/ue_exec.py scripts/ue_add_fill_lights.py
 Remove:   UE_FILL_REMOVE=1 python3 ... (env is read INSIDE the editor process, so set it
@@ -37,27 +37,38 @@ else:
     base_az = math.degrees(math.atan2(fwd.y, fwd.x))  # anti-sun azimuth
 
     SPIRE_X, SPIRE_Y = 90250.0, -4360.0
-    R = 1400.0
-    INTENS = 2500000.0
+
+    def spot(label, pos, tgt, intens, outer, inner):
+        rot = unreal.MathLibrary.find_look_at_rotation(pos, tgt)
+        actor = eas.spawn_actor_from_class(unreal.SpotLight, pos, rot)
+        actor.set_actor_label(label)
+        comp = actor.get_component_by_class(unreal.SpotLightComponent)
+        comp.set_mobility(unreal.ComponentMobility.MOVABLE)
+        comp.set_editor_property("intensity_units", unreal.LightUnits.CANDELAS)
+        comp.set_editor_property("intensity", intens)
+        comp.set_editor_property("attenuation_radius", 6000.0)
+        comp.set_editor_property("outer_cone_angle", outer)
+        comp.set_editor_property("inner_cone_angle", inner)
+        comp.set_editor_property("cast_shadows", True)
+        comp.set_editor_property("specular_scale", 0.25)
+
     n = 0
+    # COLUMN tiers (scene29): 2 azimuth columns straddling anti-sun x 2 heights
     for daz in (-45.0, 45.0):
         az = math.radians(base_az + daz)
-        px = SPIRE_X + math.cos(az) * R
-        py = SPIRE_Y + math.sin(az) * R
+        px, py = SPIRE_X + math.cos(az) * 1400.0, SPIRE_Y + math.sin(az) * 1400.0
         for lz, aimz in ((5200.0, 4600.0), (3000.0, 2400.0)):
-            pos = unreal.Vector(px, py, lz)
-            tgt = unreal.Vector(SPIRE_X, SPIRE_Y, aimz)
-            rot = unreal.MathLibrary.find_look_at_rotation(pos, tgt)
-            actor = eas.spawn_actor_from_class(unreal.SpotLight, pos, rot)
-            actor.set_actor_label(f"FILL_BACK_{n}")
-            comp = actor.get_component_by_class(unreal.SpotLightComponent)
-            comp.set_mobility(unreal.ComponentMobility.MOVABLE)
-            comp.set_editor_property("intensity_units", unreal.LightUnits.CANDELAS)
-            comp.set_editor_property("intensity", INTENS)
-            comp.set_editor_property("attenuation_radius", 6000.0)
-            comp.set_editor_property("outer_cone_angle", 50.0)
-            comp.set_editor_property("inner_cone_angle", 25.0)
-            comp.set_editor_property("cast_shadows", True)
-            comp.set_editor_property("specular_scale", 0.25)
+            spot(f"FILL_BACK_{n}", unreal.Vector(px, py, lz),
+                 unreal.Vector(SPIRE_X, SPIRE_Y, aimz), 2500000.0, 50.0, 25.0)
             n += 1
-    print(f"added {n} FILL_BACK lights @ {INTENS:.0f} cd (anti-sun az {base_az:.1f})")
+    # BASE-BAND floods (scene30): full 360 wrap (4 x 90deg), high + down-angled.
+    # The undergrowth band at the column base is TERRAIN-shadowed on ALL azimuths
+    # (even the sun side: bottom-third p50 0.035-0.10) -> light the bush band from
+    # above so its camera-facing sides read as lit foliage in every view.
+    for daz in (0.0, 90.0, 180.0, 270.0):
+        az = math.radians(base_az + daz)
+        px, py = SPIRE_X + math.cos(az) * 1300.0, SPIRE_Y + math.sin(az) * 1300.0
+        spot(f"FILL_BACK_{n}", unreal.Vector(px, py, 3400.0),
+             unreal.Vector(SPIRE_X, SPIRE_Y, 1900.0), 3000000.0, 65.0, 40.0)
+        n += 1
+    print(f"added {n} FILL_BACK lights (v4 rig; anti-sun az {base_az:.1f})")
