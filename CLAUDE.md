@@ -459,10 +459,10 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-31 recipes (what works and what doesn't)
-The current LIVE default is **scene31** (1.51M gauss, 19.3MB): the scene30 capture
-(fill v4 + close orbit) retrained ALPHA-SEALED (random-bg GT compositing) and shipped
-with NO island-wide despike — see the three bullets below. Key findings (scenes 19-31):
+## LAYERED splats: the scene25-32 recipes (what works and what doesn't)
+The current LIVE default is **scene32** (1.51M gauss, 19.2MB): scene31's alpha-sealed
+geometry + COLORS fine-tuned on a natural-light recapture (GEOMETRY-FROM-LIT /
+COLOR-FROM-NATURAL, below). Key findings (scenes 19-32):
 - **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
   `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
   (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
@@ -516,6 +516,25 @@ with NO island-wide despike — see the three bullets below. Key findings (scene
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **GEOMETRY-FROM-LIT, COLOR-FROM-NATURAL (scene32, the current best & live default).**
+  Fill lights are a CAPTURE tool, not a look: they trade the scene's natural shadow for
+  trainable (non-deletable) dark faces — scene31 was watertight but the user caught the
+  missing shadow running down the spire (and the column-spot/base-flood seam left
+  bright-dark-bright banding). The fix keeps both: (1) train geometry on the FILL-LIT
+  capture (alpha-sealed, scene31); (2) recapture the SAME 802 poses with ZERO fill
+  lights; (3) fine-tune ONLY SH colors on the natural images — warm-start from the
+  sealed ply (`scripts/pod_patch_finetune.py`: LOAD_ITER env patches
+  `Scene(..., load_iteration=)` AND re-inits exposures — `load_ply` skips
+  `create_from_pcd`'s exposure setup, otherwise `training_setup` crashes on
+  `_exposure`), with `--position_lr_init 0 --position_lr_final 0 --scaling_lr 0
+  --rotation_lr 0 --opacity_lr 0 --densify_until_iter 0 --opacity_reset_interval
+  999999 --iterations 6000` (~6 min on A100, data_device cuda, NO random_background,
+  NO -d). Dark faces then LOOK genuinely shadowed but are frozen opaque gaussians —
+  dark rock, not holes. Verify: hole scan unchanged (145,069 vs 145,446 px), gaussian
+  count identical, shadow gradient matches GT at the user's HUD pose. Replay any user
+  screenshot EXACTLY via `window.setCameraState({position:tgt, angles:[pitch,yaw,0],
+  distance:d, fov:50, mode:'orbit'})` in the headed browser (settings-json cameras get
+  re-framed by the viewer; setCameraState does not).
 - **TRANSPARENT HOLES: measure with the BG-FLIP SCANNER, never by eyeballing poses
   (scene31's gate, now permanent).** `scripts/hole_scan.sh <sog> <dir>` renders 42 spire
   poses (out/site/q31scan/: 12 az x 3 heights x R14 + 6 x R25) twice each — magenta vs
