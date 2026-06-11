@@ -459,10 +459,10 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-34 recipes (what works and what doesn't)
-The current LIVE default is **scene34** (1.35M gauss, 17.3MB): ONE from-scratch
-alpha-seal training directly on the NATURAL-light captures + foliage-off concat, no
-despike. THE recipe (everything else below is history/lessons): capture natural EV10
+## LAYERED splats: the scene25-35 recipes (what works and what doesn't)
+The current LIVE default is **scene35** (1.38M gauss, 17.5MB): the scene34 one-pass
+alpha-seal recipe trained on LINEAR-HDR captures tone-mapped by our own fitted curve
+(see LINEAR-HDR LAW below) + foliage-off concat, no despike. THE recipe (everything else below is history/lessons): capture natural EV10
 802 poses with depth → `scripts/pod_patch_alpha.py` (GT-depth bg masks + random-bg GT
 compositing, --random_background) → 30K iters default resets, depth-reg 0.25→0.01,
 --data_device cuda, all on /root → concat OFF layer dedup 0.5 → recenter scene26 ctr →
@@ -523,6 +523,22 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **LINEAR-HDR LAW (scene35, the current best & live default): capture float EXR, own
+  the tone curve.** The definitive fix for the capture-limited shadow band (next bullet):
+  `UE_HDR_COLOR=1` switches the color SceneCapture to SCS_FINAL_COLOR_HDR + RTF_RGBA16F →
+  true float EXR per pose (same export machinery as depth; ~6.6MB each). Probe-validated:
+  the shadow band that holds 24 8-bit codes in filmic LDR holds ~21K distinct linear
+  values, highlights unclipped (max 7.8+). `scripts/hdr_to_training_png.py` then makes
+  8-bit training PNGs: `fit` a binned-median LUT from ONE paired probe (EXR + LDR PNG at
+  the same pose — mids/highlights match UE's filmic, shipped look preserved) and a LIFTED
+  TOE (linear 0.10 → display 0.16 @ γ2.2, max() handover ~x0.2): shadow band 24 → 132
+  training code values, median 0.06 → 0.145. Then the standard one-pass alpha-seal
+  recipe unchanged. Result at the user's pose: black banding → readable rock striations,
+  mush ground → legible rocks/litter; hole scan in family (147K). GOTCHAS: clamp EXR
+  negatives (TSR ringing, to −12 observed); EXRs land extensionless → renamed .exr; the
+  frames' file_path records the FUTURE .png (converter runs before dataset prep);
+  Laplacian-variance sharpness is NOT comparable across tone curves (8-bit banding reads
+  as 'sharpness') — gate dark-region quality VISUALLY or range-normalized.
 - **SHADOW SHARPNESS IS CAPTURE-LIMITED — three trainer-side attempts all failed (post-scene34).**
   User asked for sharper/more-even shadows + crisper ground under them. The information
   isn't in display-encoded captures: UE's filmic EV10 output crushes the shadow band to
