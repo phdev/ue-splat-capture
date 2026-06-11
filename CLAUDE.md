@@ -523,6 +523,26 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **SHADOW SHARPNESS IS CAPTURE-LIMITED — three trainer-side attempts all failed (post-scene34).**
+  User asked for sharper/more-even shadows + crisper ground under them. The information
+  isn't in display-encoded captures: UE's filmic EV10 output crushes the shadow band to
+  ~5-8 8-bit code values, and nothing at training time can recover detail that was
+  quantized away. Measured failures (baselines: ground Laplacian-var 75.7, shadow 346
+  at the user's pose): (1) DENSER TRAINING (grad_thresh 0.0001, densify→24K, 40K iters):
+  +70% gaussians, sharpness UNCHANGED (75.5/361) — densification is gradient-driven and
+  dark pixels make no gradients; capacity went to bright regions. (2) DUAL-EXPOSURE
+  (second EV8.5 capture + vanilla per-image exposure affines, EV10 pinned to identity,
+  bright frames supervising dark pixels only): COLLAPSED to 180K gaussians, washed tone
+  — the filmic tonemap is NOT affine-bridgeable (best EV10→EV8.5 affine on darks: MAE
+  0.17 — permanent supervision conflict; the exposure mechanism is for linear/raw
+  exposure variation). (3) RELATIVE-L1 (weight 1/(lum+0.08), mean-normalized): WORSE —
+  61.8/191 and darker; down-weights the bright regions that drive densification and
+  amplifies shadow noise as much as signal. THE REAL FIX (untried, opt-in): capture HDR
+  (SCS_FINAL_COLOR_HDR float EXR, like the depth pipeline's RTF_RGBA16F) and own the
+  tonemap — a gentle-toe curve gives shadows real code values end-to-end; ships with a
+  subtly lifted shadow look. Half-day pipeline branch. ALSO: always `stat` the trained
+  ply BEFORE deleting the pod (a 44MB collapse was only caught after the log died), and
+  `pkill -f` self-match struck AGAIN — kill by PID only, forever.
 - **DEPRECATED PATH + its lessons (scenes 29-33: fill lights & warm-start fine-tunes).**
   Fill lights fixed black-on-black deletion before we had alpha-sealing, but they ERASE
   the scene's natural shadows, and the color-only fine-tune invented to restore them
