@@ -261,7 +261,13 @@ def _tick(delta_seconds):
             base = f"cam_{p['index']:03d}"
             unreal.RenderingLibrary.export_render_target(_S["world"], _S["rt"], _S["out_dir"] + "/images", base)
             raw = os.path.join(_S["out_dir"], "images", base); png = raw + ".png"
-            if os.path.exists(raw) and not os.path.exists(png):
+            if os.environ.get("UE_HDR_COLOR") == "1":
+                # float RT exports a true EXR; keep it as .exr and record the FUTURE
+                # .png path -- scripts/hdr_to_training_png.py writes it pre-dataset.
+                exr = raw + ".exr"
+                if os.path.exists(raw) and not os.path.exists(exr):
+                    os.replace(raw, exr)
+            elif os.path.exists(raw) and not os.path.exists(png):
                 os.replace(raw, png)
             depth_path = None
             if _S.get("dcomp"):
@@ -392,7 +398,14 @@ def main():
         unreal.SceneCapture2D, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
     comp = actor.capture_component2d
     comp.fov_angle = hfov
-    comp.capture_source = unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR
+    # UE_HDR_COLOR=1: capture LINEAR pre-tonemap color (SCS_FINAL_COLOR_HDR) into a
+    # float RT -> true EXR export. The 8-bit LDR path crushes the shadow band to ~24
+    # code values (measured); linear half-float holds ~21K distinct values there. A
+    # local converter (scripts/hdr_to_training_png.py) then applies OUR tone curve
+    # (filmic-matched mids/highlights, lifted toe) to make 8-bit training PNGs.
+    hdr_color = os.environ.get("UE_HDR_COLOR") == "1"
+    comp.capture_source = (unreal.SceneCaptureSource.SCS_FINAL_COLOR_HDR if hdr_color
+                           else unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
     for k, v in [("capture_every_frame", False), ("capture_on_movement", False),
                  ("always_persist_rendering_state", True)]:
         try: comp.set_editor_property(k, v)
@@ -412,8 +425,10 @@ def main():
             pp.set_editor_property(k, v)
         comp.set_editor_property("post_process_settings", pp)
     except Exception: pass
-    rt = unreal.RenderingLibrary.create_render_target2d(actor, cap_res, cap_res,
-                                                        unreal.TextureRenderTargetFormat.RTF_RGBA8)
+    rt = unreal.RenderingLibrary.create_render_target2d(
+        actor, cap_res, cap_res,
+        unreal.TextureRenderTargetFormat.RTF_RGBA16F if hdr_color
+        else unreal.TextureRenderTargetFormat.RTF_RGBA8)
     comp.texture_target = rt
 
     # UE_SHOW_ONLY=1 (NUCLEAR ground-only mode): MESH-NAME filter -- render only terrain
