@@ -459,10 +459,17 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-32 recipes (what works and what doesn't)
-The current LIVE default is **scene32** (1.51M gauss, 19.2MB): scene31's alpha-sealed
-geometry + COLORS fine-tuned on a natural-light recapture (GEOMETRY-FROM-LIT /
-COLOR-FROM-NATURAL, below). Key findings (scenes 19-32):
+## LAYERED splats: the scene25-34 recipes (what works and what doesn't)
+The current LIVE default is **scene34** (1.35M gauss, 17.3MB): ONE from-scratch
+alpha-seal training directly on the NATURAL-light captures + foliage-off concat, no
+despike. THE recipe (everything else below is history/lessons): capture natural EV10
+802 poses with depth → `scripts/pod_patch_alpha.py` (GT-depth bg masks + random-bg GT
+compositing, --random_background) → 30K iters default resets, depth-reg 0.25→0.01,
+--data_device cuda, all on /root → concat OFF layer dedup 0.5 → recenter scene26 ctr →
+SOG → bg-flip hole scan gate. The compositing alone defeats black-on-black deletion
+(a transparent/deleted dark face shows random bg → crushed), so FILL LIGHTS ARE
+UNNECESSARY — and so is the geometry-from-lit/color-from-natural fine-tune that
+compensated for them. Key findings (scenes 19-34):
 - **VISIBILITY STATE PERSISTS in the editor across sessions.** Foliage-off experiments that
   `set_visibility(False)` on ISMCs silently corrupted EVERY later capture in that editor
   (and survived restarts via unsaved-state). ALWAYS run the restore-visibility sweep (set
@@ -516,7 +523,34 @@ COLOR-FROM-NATURAL, below). Key findings (scenes 19-32):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
-- **GEOMETRY-FROM-LIT, COLOR-FROM-NATURAL (scene32, the current best & live default).**
+- **DEPRECATED PATH + its lessons (scenes 29-33: fill lights & warm-start fine-tunes).**
+  Fill lights fixed black-on-black deletion before we had alpha-sealing, but they ERASE
+  the scene's natural shadows, and the color-only fine-tune invented to restore them
+  (geometry-from-lit/color-from-natural) has FOUR pathologies we hit in sequence:
+  (1) stale view-dependent SH — f_dc adapts, f_rest keeps fill-era values → faces
+  collapse dark at under-constrained view directions (zeroing f_rest at warm-start
+  didn't save it); (2) the LOAD_ITER warm start needs exposure re-init (`load_ply`
+  skips `create_from_pcd`'s exposure setup → `_exposure` AttributeError) and the
+  per-image exposure params train regardless and can absorb color error; (3) training
+  rays pass through the splat's own puffy crowns (real trees are sparser than their
+  gaussians), so under-supervised pockets keep warm-start colors → the scene32 "warm
+  strip on the shadow face" artifact the user kept catching; (4) without random-bg
+  compositing in the fine-tune, giant no-despike gaussians get dragged toward the black
+  GT background. ONE-PASS ALPHA-SEAL ON NATURAL CAPTURES (scene34) has none of these.
+- **PROBE RINGS LIE ABOUT EXPOSURE — EV-verify before trusting any quick GT probe.**
+  Two 16-pose probe rings captured to fact-check a user report were OVEREXPOSED
+  (~+2 stops: non-bg p25 0.60-0.66 vs the EV-consistent dataset's 0.18-0.24 at the
+  same azimuth) — the EV pin doesn't take on quick warm-editor probe orbits the way it
+  does on full captures. A false "this face is sunlit" reading from those probes sent
+  two fine-tune attempts chasing a non-existent SH bug. ALWAYS compare a new probe's
+  non-background luminance percentiles against dataset frames at the same azimuth
+  BEFORE believing it; when probe and dataset disagree, the dataset is the truth.
+  (The dataset itself is exposure-consistent: same pinned-EV pipeline end to end.)
+- **setCameraState replay quirks (viewer):** distance changes are CLAMPED to a scene
+  min — to dolly closer, keep d fixed and advance the focal point along the view ray
+  (focal' = focal + fwd*Δ); the fov field is ignored (stays 50); idle pages stop
+  re-rendering — always fresh-goto before setCameraState, one set per page load.
+- **GEOMETRY-FROM-LIT, COLOR-FROM-NATURAL (scene32 — superseded by scene34's one-pass).**
   Fill lights are a CAPTURE tool, not a look: they trade the scene's natural shadow for
   trainable (non-deletable) dark faces — scene31 was watertight but the user caught the
   missing shadow running down the spire (and the column-spot/base-flood seam left
