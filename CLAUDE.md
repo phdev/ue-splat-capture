@@ -460,9 +460,8 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
 ## LAYERED splats: the scene25-35 recipes (what works and what doesn't)
-The current LIVE default is **scene35** (1.38M gauss, 17.5MB): the scene34 one-pass
-alpha-seal recipe trained on LINEAR-HDR captures tone-mapped by our own fitted curve
-(see LINEAR-HDR LAW below) + foliage-off concat, no despike. THE recipe (everything else below is history/lessons): capture natural EV10
+The current LIVE default is **scene34** (1.35M gauss, 17.3MB; scene35 linear-HDR v1
+REGRESSED and was reverted — see the LINEAR-HDR bullet's v1 post-mortem). THE recipe (everything else below is history/lessons): capture natural EV10
 802 poses with depth → `scripts/pod_patch_alpha.py` (GT-depth bg masks + random-bg GT
 compositing, --random_background) → 30K iters default resets, depth-reg 0.25→0.01,
 --data_device cuda, all on /root → concat OFF layer dedup 0.5 → recenter scene26 ctr →
@@ -523,8 +522,7 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
-- **LINEAR-HDR LAW (scene35, the current best & live default): capture float EXR, own
-  the tone curve.** The definitive fix for the capture-limited shadow band (next bullet):
+- **LINEAR-HDR (scene35 v1 — REVERTED; capture machinery is sound, the v1 CURVE failed).** The definitive fix for the capture-limited shadow band (next bullet):
   `UE_HDR_COLOR=1` switches the color SceneCapture to SCS_FINAL_COLOR_HDR + RTF_RGBA16F →
   true float EXR per pose (same export machinery as depth; ~6.6MB each). Probe-validated:
   the shadow band that holds 24 8-bit codes in filmic LDR holds ~21K distinct linear
@@ -539,6 +537,19 @@ compensated for them. Key findings (scenes 19-34):
   frames' file_path records the FUTURE .png (converter runs before dataset prep);
   Laplacian-variance sharpness is NOT comparable across tone curves (8-bit banding reads
   as 'sharpness') — gate dark-region quality VISUALLY or range-normalized.
+- **LINEAR-HDR v1 POST-MORTEM (user verdict at d=101 wide view: 'demonstrably worse').**
+  Three regressions, all CURVE design errors, none capture errors: (1) the toe lift
+  (0.10→0.16) flattened the spire's natural shadow CONTRAST scene-wide — 'readable
+  shadows' read as 'washed out' at distance; the user wants scene34's look, not brighter
+  darks. (2) The fitted LUT CLAMPS above its fit range: unclipped HDR speculars (linear
+  up to ~54) all map to pure white → white glint SPIKES all over foliage that filmic's
+  shoulder rolled off smoothly. Any v2 curve needs a proper shoulder (Reinhard-style
+  above the fit range), never clamp. (3) Purple/green sky FLOATERS at far viewpoints:
+  the lifted toe makes the near-black noise floor visible, and d>100m viewpoints exceed
+  every training distance (dome max 65m) so the alpha-seal never saw those rays. QA
+  GAPS to fix before any retry: add a far/wide gate pose (d≈100, multiple azimuths) and
+  a glint metric (white-pixel fraction on foliage); 'mids match at one probe pose' does
+  not gate global contrast. If retrying: toe ≤0.12 with shoulder, or accept scene34.
 - **SHADOW SHARPNESS IS CAPTURE-LIMITED — three trainer-side attempts all failed (post-scene34).**
   User asked for sharper/more-even shadows + crisper ground under them. The information
   isn't in display-encoded captures: UE's filmic EV10 output crushes the shadow band to
