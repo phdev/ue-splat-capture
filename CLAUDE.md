@@ -523,6 +523,28 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **CANYON-SCALE FAILED with the island recipe (scene37 v1-v3 post-mortem; NOT deployed).**
+  Region B (200×200m amphitheater, 2,190 poses/9 stations → 1,289 after buried-frame
+  filtering) trained to FOG three times. v1: 130K gaussians (large-scene densify bias —
+  distant cams = tiny per-gaussian footprints; fix knobs GRAD_THRESH 0.00006 +
+  percent_dense 0.003 + densify→26K + 40K iters gave 9× at ck15). v2/v3: capacity fine
+  (1.05M/1.87M) but renders are soup EVEN AT CAPTURE POSES; train PSNR 16.3; numeric
+  profile: 27.6K giant gaussians to 70m (island: 45) + depth-truth voting flags 77% of
+  the model as air-fog (≥2 views, ≥1.5m in front of GT). ROOT CAUSE (structural):
+  ENCLOSED scenes defeat the alpha-seal — almost no rays hit true background, so
+  random-bg compositing has no leverage on mid-air fog, and fog along training rays IS
+  a valid fit for training views (16 PSNR) while novel views collapse. The island only
+  ever worked because open silhouettes + bg compositing constrained the air. Post-hoc
+  giant-kill and fog-cull (≥2 votes → kept 433K) did NOT recover a usable scene.
+  LESSONS: (a) capture-side hygiene that DID work and is reusable — ~35-55% of dome
+  poses in ringed/enclosed regions are buried (filter at 0.40 black-frac), 500K init
+  points for ~250m extents, canyon renders ~11.4s/pose (2.4× island); (b) the viewer
+  has no exterior vantage for region captures — every camera must be in open air
+  inside the bowl; (c) NEXT TIME pick ONE of: much stronger depth supervision (raise
+  DEPTH_W and hold it), a large-scene backbone (Octree-GS / CityGaussian / hierarchical
+  3DGS — see the Exa sweep), or capture open-sky sub-targets (a single spire cluster
+  orbited like the island would work with today's recipe). Assets kept for reuse:
+  out/ed_rb_* (2,190 frames + depth), /tmp tooling, depth_rb3_40000.ply.
 - **INTERIOR-POCKET law (scene36, the current best & live default): crevice/gully
   interiors are COVERAGE HOLES — give them dedicated inward rings.** The southern gully
   rendered as smeared mush; the nearest training camera passed 7m away but every pose
