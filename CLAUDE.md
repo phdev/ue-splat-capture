@@ -459,12 +459,88 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-36 recipes (what works and what doesn't)
-The current LIVE default is **scene36** (1.39M gauss, 17.6MB): the scene34 one-pass
-alpha-seal recipe retrained on 854 views = 802 natural + a 52-pose GULLY RING (see
-INTERIOR-POCKET law below). scene35 linear-HDR v1 regressed and was reverted. THE recipe (everything else below is history/lessons): capture natural EV10
+## UNIVERSAL PIPELINE — capture + train ANY UE level (the scene37/38 recipe)
+ONE recipe now covers both open hero scenes and enclosed/large regions. Validated
+both directions: the canyon Region B that failed 3 times under the photometric
+recipe trained SOLID under depth-primary (scene37, pod gate MAE 0.037, draft tier),
+and the island RE-trained under the exact same recipe with zero regression
+(scene38, gate MAE 0.0086, all standing QA gates passed — LIVE DEFAULT).
+- **DEPTH-PRIMARY supervision is THE law: `--depth_l1_weight_init 1.0
+  --depth_l1_weight_final 0.5` (held high), never vanilla's 0.25→0.01 decay.** GT
+  depth is a primary supervisor, not a regularizer: it forbids air-fog in ANY
+  topology. The alpha-seal (pod_patch_alpha.py + --random_background) STAYS — bg
+  compositing seals silhouettes where background exists; depth carries enclosed
+  interiors where it doesn't. The enclosed-scene degeneracy it fixes (canyon v2/v3):
+  with almost no bg pixels the alpha-seal has no leverage and fog along training
+  rays IS a valid photometric fit (train PSNR 16.3) while novel views collapse —
+  77% of the v3 model audited as air-fog. Depth-primary cut that to ~0.8%, and on
+  the OPEN island it cost nothing (island-quality gate MAE).
+- **Scale-adaptive knobs by content extent** (the ONLY tier difference):
+  | extent | grad_thresh | percent_dense | densify_until | iters | init pts |
+  |---|---|---|---|---|---|
+  | ≤120m standard | 0.00013 | 0.01 | 20000 | 30000 | 120K |
+  | >120m large | 0.00006 | 0.003 | 26000 | 40000 | 500K |
+  Neither direction transfers: hero knobs on a large scene under-densify (canyon v1
+  stalled at 130K gaussians — distant cams = tiny pixel footprints = weak grads);
+  canyon knobs on the island OVER-densified (ck15 hit 1.56GB, killed + relaunched).
+- **Auto-driver: `python3 scripts/any_pipeline.py [--region x0,y0,x1,y1]
+  [--prefix P]`** against the WARM editor (level loaded + streamed; verify foliage
+  instance counts first — VISIBILITY-PERSISTS law). Stages: SCOUT
+  (`ue_capture/capture_any.py` via remote exec — ISMC transform sampling with
+  StaticMeshActor fallback → extent/ground-z/tall-cluster NMS) → RIG (full dome
+  stations spread along the major axis when span>110m, R 65/70m; orbit rings at tall
+  clusters elev -5..55 naz 24 R 22m; far context ring R min(600m, 1.25·span)) →
+  PROBE/DISPLACE per station (16-pose 512px ring; >10% frames buried
+  (black_frac>0.40 = camera inside rock/foliage) → displace +10m up + radius ×1.2,
+  2 retries; still >60% → SKIP the station — ringed/enclosed regions bury 35-55% of
+  naive dome poses) → CAPTURE sequentially at 1536px EV10 NOSKY GT-depth
+  (completion = ue_poses.json appears) → MERGE (drop frames black_frac>0.40, prefix
+  per station) → PREP (prep_depth_dataset.sh, re-init sparse points by tier, jpg
+  q92 pack, tar) → prints the tier's pod commands. STATUS: SCOUT/RIG/EMIT validated
+  live on the canyon level (full 1562m extent → large tier; 100m region → standard
+  tier); probe→prep stages are the proven rb/island mechanics folded in verbatim,
+  but the full loop hasn't burned a complete capture end-to-end yet — babysit the
+  first real run.
+- **Pod-side depth GATE is MANDATORY before pod delete
+  (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
+  the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
+  island-quality ≈0.009 mean; canyon draft 0.037; fog/soup >0.1 on many views. Also
+  `stat` the final ply BEFORE delete, and sanity-check the iteration_15000 ply size
+  mid-train (~310-380MB healthy at these tiers; 1.5GB = runaway densification, kill
+  early).
+- **Calibrated depth-truth audit (host-side, on a downloaded ply):** flag a
+  gaussian as fog only if it sits ≥2.5m IN FRONT of GT depth in >0.6 of the views
+  that SEE it (seen≥4). ABSOLUTE vote thresholds (≥2 of 36 views) are statistically
+  broken — binomial accumulation of ~10% per-view false positives flags ~90% of ANY
+  model, including known-good ones.
+- **PKILL BRACKET LAW (cost three training runs):** every pgrep/pkill -f inside a
+  remote ssh one-liner MUST use a [b]racketed pattern (`pkill -f '[t]rain.py'`).
+  The bare pattern matches the ssh wrapper shell's own cmdline; worse, the SIGTERM
+  queued on a D-state python lands MINUTES later and kills the healthy relaunched
+  run (rc=143 mid-train, no error in the log).
+- **network_gui port lingers** after a kill -9: relaunch train.py with a fresh
+  `--port NNNN`, and treat "Address already in use" in a train log as the NON-FATAL
+  gui-listener warning it is — a monitor that treated it as fatal spawned a second
+  trainer on the same model dir (two trainers, corrupted checkpoints).
+- Inherited pod rules: `--data_device cuda` on an A100-80GB (cpu only when frames
+  don't fit — expect a 10-15min page-in crawl before full speed); everything under
+  /root (NEVER /workspace); chunked parallel scp for bulk pulls; far-pose viewer
+  gate + bg-flip hole scan before every deploy; ALWAYS delete the pod.
+
+## LAYERED splats: the scene25-38 recipes (what works and what doesn't)
+The current LIVE default is **scene38** (1.47M gauss, 18.5MB): the scene36 dataset
+(854 views = 802 natural + the 52-pose gully ring) RE-trained under the UNIVERSAL
+depth-primary recipe above — all standing gates passed (gully/user/island/az225/far
+poses, bg-flip hole scan 149,108 px = scene34 family, pod gate MAE 0.0086).
+**scene37** (`?scene=scene37`) is the canyon Region B companion from the same
+recipe (1,289 views over 9 stations, draft quality — novel-view smear from sparse
+station overlap remains; densifying stations via the auto-driver is the designed
+fix). scene36 = the same island data under the older photometric-primary recipe;
+scene35 linear-HDR v1 regressed and was reverted. THE capture recipe (everything
+below is history/lessons): capture natural EV10
 802 poses with depth → `scripts/pod_patch_alpha.py` (GT-depth bg masks + random-bg GT
-compositing, --random_background) → 30K iters default resets, depth-reg 0.25→0.01,
+compositing, --random_background) → 30K iters default resets, DEPTH-PRIMARY
+weights (1.0→0.5, see above; pre-scene38 used vanilla 0.25→0.01),
 --data_device cuda, all on /root → concat OFF layer dedup 0.5 → recenter scene26 ctr →
 SOG → bg-flip hole scan gate. The compositing alone defeats black-on-black deletion
 (a transparent/deleted dark face shows random bg → crushed), so FILL LIGHTS ARE
@@ -523,7 +599,8 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
-- **CANYON-SCALE FAILED with the island recipe (scene37 v1-v3 post-mortem; NOT deployed).**
+- **CANYON-SCALE: photometric-primary FAILED 3× — depth-primary SOLVED it (this
+  post-mortem produced the UNIVERSAL PIPELINE; scene37 deployed from v4).**
   Region B (200×200m amphitheater, 2,190 poses/9 stations → 1,289 after buried-frame
   filtering) trained to FOG three times. v1: 130K gaussians (large-scene densify bias —
   distant cams = tiny per-gaussian footprints; fix knobs GRAD_THRESH 0.00006 +
@@ -545,8 +622,12 @@ compensated for them. Key findings (scenes 19-34):
   3DGS — see the Exa sweep), or capture open-sky sub-targets (a single spire cluster
   orbited like the island would work with today's recipe). Assets kept for reuse:
   out/ed_rb_* (2,190 frames + depth), /tmp tooling, depth_rb3_40000.ply.
-- **INTERIOR-POCKET law (scene36, the current best & live default): crevice/gully
-  interiors are COVERAGE HOLES — give them dedicated inward rings.** The southern gully
+  RESOLUTION: option "much stronger depth supervision" WON — the same 1,289-frame
+  dataset retrained with DEPTH_W 1.0→0.5 (held) went from 77% fog to a solid,
+  navigable bowl (scene37, pod gate MAE 0.037 vs island 0.0086 — draft tier; the
+  residual novel-view smear is sparse station overlap, not fog).
+- **INTERIOR-POCKET law (scene36; its gully ring lives on in the scene38 default):
+  crevice/gully interiors are COVERAGE HOLES — give them dedicated inward rings.** The southern gully
   rendered as smeared mush; the nearest training camera passed 7m away but every pose
   (dome, spire orbits, close orbit) grazes ACROSS the rim — none look INTO the pocket.
   Under-observed volume = big soft gaussians; being shadowed compounds it but coverage
@@ -681,7 +762,7 @@ compensated for them. Key findings (scenes 19-34):
   flickers too), which is what makes no-despike shippable. Verify the patch took:
   "[alpha-patch] loaded 802 bg masks" in the train log at iter 0.
 - **BASE-BAND mush at close range = TERRAIN-shadowed undergrowth + no close views
-  (scene30, the current best & live default).** scene29 fixed the column but its BASE
+  (scene30).** scene29 fixed the column but its BASE
   still dissolved into dark see-through mush in the user's close-up (pose HUD made the
   exact view reproducible). Measured: the bush band wrapping the column base is
   terrain-shadowed on EVERY azimuth — bottom-third p50 0.04-0.10 even on the SUN side —
