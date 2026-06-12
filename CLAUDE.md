@@ -459,9 +459,10 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
 
-## LAYERED splats: the scene25-35 recipes (what works and what doesn't)
-The current LIVE default is **scene34** (1.35M gauss, 17.3MB; scene35 linear-HDR v1
-REGRESSED and was reverted — see the LINEAR-HDR bullet's v1 post-mortem). THE recipe (everything else below is history/lessons): capture natural EV10
+## LAYERED splats: the scene25-36 recipes (what works and what doesn't)
+The current LIVE default is **scene36** (1.39M gauss, 17.6MB): the scene34 one-pass
+alpha-seal recipe retrained on 854 views = 802 natural + a 52-pose GULLY RING (see
+INTERIOR-POCKET law below). scene35 linear-HDR v1 regressed and was reverted. THE recipe (everything else below is history/lessons): capture natural EV10
 802 poses with depth → `scripts/pod_patch_alpha.py` (GT-depth bg masks + random-bg GT
 compositing, --random_background) → 30K iters default resets, depth-reg 0.25→0.01,
 --data_device cuda, all on /root → concat OFF layer dedup 0.5 → recenter scene26 ctr →
@@ -522,6 +523,20 @@ compensated for them. Key findings (scenes 19-34):
   resets — resets kill fog, and the now-visible face survives them. Validate with an
   8-pose probe orbit (~1 min) BEFORE burning the 1h full capture. scene29: back face
   solid textured rock at az200-270, island clean, zero floaters, 1.58M/19.3MB.
+- **INTERIOR-POCKET law (scene36, the current best & live default): crevice/gully
+  interiors are COVERAGE HOLES — give them dedicated inward rings.** The southern gully
+  rendered as smeared mush; the nearest training camera passed 7m away but every pose
+  (dome, spire orbits, close orbit) grazes ACROSS the rim — none look INTO the pocket.
+  Under-observed volume = big soft gaussians; being shadowed compounds it but coverage
+  is the root cause. FIX: a small ring AT the pocket target (here 52 poses: R14m elev
+  25/45 naz20 + R20m elev 60 naz12 around world (90783,-7869,3419)), PROBE-VERIFIED for
+  line-of-sight first (8-pose mini-ring; inward azimuths must show the interior, and
+  check the camera isn't inside foliage), folded into the full set for a one-pass
+  retrain (never a bolt-on layer — scene27 law). Result: defined walls/log/undergrowth,
+  zero regressions elsewhere. Convert any user-reported HUD pose to the ring target via
+  the viewer→ply→world mapping. ALSO: the FAR POSE (d≈100m, beyond all training
+  distances) is now a STANDING GATE — scene35's floaters only showed there; training
+  views top out at ~65m so extrapolated viewpoints are where junk hides.
 - **LINEAR-HDR (scene35 v1 — REVERTED; capture machinery is sound, the v1 CURVE failed).** The definitive fix for the capture-limited shadow band (next bullet):
   `UE_HDR_COLOR=1` switches the color SceneCapture to SCS_FINAL_COLOR_HDR + RTF_RGBA16F →
   true float EXR per pose (same export machinery as depth; ~6.6MB each). Probe-validated:
