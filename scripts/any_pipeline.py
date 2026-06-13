@@ -260,6 +260,8 @@ def main():
     ap.add_argument("--skip-probe", action="store_true")
     ap.add_argument("--from-merge", action="store_true",
                     help="captures already on disk; merge+prep only")
+    ap.add_argument("--max-stations", default="", help="override UA_MAX_STATIONS (denser dome coverage)")
+    ap.add_argument("--max-orbits", default="", help="override UA_MAX_ORBITS (denser cluster orbits)")
     args = ap.parse_args()
 
     if not args.skip_scout and not args.from_merge:
@@ -268,6 +270,10 @@ def main():
         cfg = {"UA_OUT_PREFIX": args.prefix}
         if args.region:
             cfg["UA_REGION_CM"] = args.region
+        if args.max_stations:
+            cfg["UA_MAX_STATIONS"] = args.max_stations
+        if args.max_orbits:
+            cfg["UA_MAX_ORBITS"] = args.max_orbits
         send_capture("scout", cfg, target="ue_capture/capture_any.py")
         for _ in range(24):
             if os.path.exists(PLAN):
