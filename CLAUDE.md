@@ -571,8 +571,12 @@ and the island RE-trained under the exact same recipe with zero regression
   settle dominates). any_pipeline does NOT set UE_AVG_SAMPLES yet — wiring it in is
   the next quality lever for the canyon. Trainer-side alternative: Mip-Splatting
   (brush --render-mode mip) softens foliage spikes but loses depth-primary's
-  enclosed-scene robustness (risky for the bowl). SH degree 1 in the SOG (vs -H 0)
-  may cut view-dependent shimmer on wet rock at +size.
+  enclosed-scene robustness (risky for the bowl). TESTED + REJECTED free tweaks:
+  SH degree 1 in the SOG (vs -H 0) is VISUALLY IDENTICAL on this diffuse rock+foliage
+  canyon (no view-dependent specular for SH to carry) — +6MB for nothing, keep -H 0;
+  shipping denser (4.5M vs 3.2M) adds only marginal foliage fullness at +24MB (62MB,
+  too heavy for mobile). Neither touches the foliage streak. So the ONLY real lever
+  left for the streak is capture-side temporal averaging — everything else is a wash.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
