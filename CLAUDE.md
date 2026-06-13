@@ -524,6 +524,36 @@ and the island RE-trained under the exact same recipe with zero regression
   point_cloud.ply (4.9M), /tmp/scene39.sog (36MB), /tmp/show_gate.tar.gz. The
   bimodal gate is the diagnostic — read PER-VIEW MAE, never just the mean, to tell a
   localized coverage hole from a global failure.
+- **DOME-GRID rig SOLVED it (scene39 burn #2, DEPLOYED — best gate this project has
+  produced).** The fix for scene39 burn #1's starved pocket: replace the 3-focus
+  major-axis spread with a 2D GRID of dome stations (capture_any.py, default budget
+  6) scaled to area, AND — critically — make grid domes ORBIT-kind ring-domes
+  (UE_SPIRE_ORBIT), NOT UE_FULL. UE_FULL is a hardcoded 441-pose COMPOUND rig
+  (dome 240 + wide 120 + nadir 81) that IGNORES UE_ELEVATIONS/UE_N_AZ and hardcodes
+  island-ground Z heights (1849/1500/1150cm) — for a canyon grid cell it plants
+  cameras below the floor and emits 6× the poses. The orbit ring-dome takes a cell
+  center + radius + ENCLOSED-tuned elevations ("20,36,52,68": drop the rim-grazing
+  8deg + sky-grazing 76deg) and yields exactly elev*naz=120 controllable poses.
+  Result on the SAME 196m amphitheater: every dome kept 74-100% of its frames (vs
+  burn#1's 24-73% with the fog pocket); 992 EVENLY-distributed frames (fewer than
+  burn#1's 1260 but blanketing every cell incl. the SW pocket); pod-gate mean
+  invdepth MAE **0.00354** with NO outlier (worst single view 0.015, vs burn#1's
+  0.31) — better than the island's 0.0086, the best gate in the project. Viewer QA:
+  sharp rock columns + detailed vegetation, no haze, no fog pocket. Two more bugs
+  fixed en route: (a) wait_capture must be STALL-BASED (wait while frames keep
+  appearing), not a fixed est*25 deadline — a premature give-up launches the next
+  station while this one is still writing -> two captures collide in the editor's
+  single tick-driven state machine (wedged burn#2's first launch); (b) to abort a
+  wedged capture WITHOUT restarting the editor (preserving warm PCG), destroy all
+  SceneCapture2D actors then `unreal.SystemLibrary.collect_garbage()` — the dangling
+  tick callbacks then throw on the orphaned component and self-unregister. Train was
+  DENSE (11.8M gauss/2.93GB — even coverage constrains more real surface; depth loss
+  0.0029); deploy needs box-crop to the CONTENT-REGION CENTER (capture box world-cm
+  -> ply m via x/100,-y/100,z/100), NOT the density-skewed median (it sat 52m east
+  and a symmetric median-box cropped 1.67M real western gaussians incl. the s1
+  pocket), then decimate to ~3.2M by opacity for a 38MB SOG. LAW: a buried DOME
+  station needs MORE domes (grid), not just probe/displace — displace fixes buried
+  ORBIT rings, not under-covered dome cells.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
