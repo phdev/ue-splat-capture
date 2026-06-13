@@ -125,9 +125,15 @@ def station_cfg(st, plan, probe=False):
                 "UE_CONVERGE_TICKS": str(st["converge"]),
                 "UE_CAPTURE_OUT": f"{REPO}/out/{plan['prefix']}_{st['name']}"})
     if st["kind"] == "full":
-        cfg.update({"UE_FULL": "1", "UE_GROUND_DENSE": "1",
+        cfg.update({"UE_FULL": "1",
                     "UE_FOCUS_CM": f"{fx},{fy},{fz}",
                     "UE_ORBIT_RADIUS_CM": str(st["radius"])})
+        if st.get("ground"):          # legacy heavy dome (ground-dense pass)
+            cfg["UE_GROUND_DENSE"] = "1"
+        if st.get("elev"):            # dome-grid: enclosed-tuned elevations
+            cfg["UE_ELEVATIONS"] = st["elev"]
+        if st.get("naz"):
+            cfg["UE_N_AZ"] = str(st["naz"])
     else:
         cfg.update({"UE_SPIRE_ORBIT": "1",
                     "UE_SPIRE_CENTER_CM": f"{fx},{fy},{fz}",

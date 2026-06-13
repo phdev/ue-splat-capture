@@ -5,9 +5,11 @@ you). The level must already be loaded + streamed (warm editor; verify foliage
 instance counts first — see the VISIBILITY-PERSISTS law in CLAUDE.md). Phases:
   1. SCOUT — sample ISMC instance transforms (fallback: StaticMeshActor
              locations) -> content extent, ground z, tall-content clusters.
-  2. RIG   — dome "full" stations spread along the major axis + orbit rings at
-             the tall clusters + one far context ring. All parameters are the
-             PROVEN island/canyon values (CLAUDE.md "UNIVERSAL PIPELINE").
+  2. RIG   — a 2D GRID of dome "full" stations covering the extent (enclosed-
+             tuned elevations: no rim-grazing 8 deg, no sky-grazing 76 deg) +
+             orbit rings at the tall clusters + one far context ring. The grid
+             (vs the old 3-focus axis line) is the scene39 fix for the enclosed
+             pockets a sparse axis spread starved (CLAUDE.md UNIVERSAL PIPELINE).
   3. EMIT  — writes /tmp/ue_any_plan.json. The HOST (scripts/any_pipeline.py)
              then probes each station for line-of-sight (displacing buried
              stations up/outward), runs the captures, merges with the
@@ -27,7 +29,7 @@ import os
 import unreal
 
 PREFIX = os.environ.get("UA_OUT_PREFIX", "ed_any")
-MAX_STATIONS = int(os.environ.get("UA_MAX_STATIONS", "3"))
+MAX_STATIONS = int(os.environ.get("UA_MAX_STATIONS", "6"))  # dome-grid budget
 MAX_ORBITS = int(os.environ.get("UA_MAX_ORBITS", "4"))
 
 # ---------- 1. SCOUT ----------
@@ -83,22 +85,40 @@ for k, cnt in sorted(cells.items(), key=lambda kv: -kv[1]):
 orbit_targets = [(cx * 2000 + 1000.0, cy * 2000 + 1000.0) for (cx, cy), _ in clusters]
 print(f"[any] tall clusters (m): {[(round(x/100), round(y/100)) for x, y in orbit_targets]}")
 
-# ---------- 2. RIG (proven station parameters) ----------
+# ---------- 2. RIG: dome GRID (even enclosed-pocket coverage) ----------
+# scene39 lesson: a 3-focus major-axis line starves enclosed pockets between the
+# domes (the s1 pocket fogged at gate MAE 0.31). A 2D GRID of domes scaled to area
+# covers the bowl evenly. Pair it with ENCLOSED-TUNED elevations: drop the ~8 deg
+# ring (grazes the rim / buries in a bowl) and the ~76 deg (sees sky over the rim);
+# keep mids + one steep-down ring for the floor (so no separate ground-dense pass).
 cx0, cy0 = (lo(xs) + hi(xs)) / 2.0, (lo(ys) + hi(ys)) / 2.0
 span = max(ext_x, ext_y)
 station_R = 7000.0 if span > 120 else 6500.0
-foci = [(cx0, cy0)]
-if span > 110:  # spread full stations along the major axis (canyon recipe)
-    dx = (hi(xs) - lo(xs)) * 0.30
-    dy = (hi(ys) - lo(ys)) * 0.30
-    foci = [(cx0 - dx, cy0 - dy), (cx0, cy0), (cx0 + dx, cy0 + dy)][:MAX_STATIONS]
 focus_z = ground_z + 1000.0
+x0g, x1g, y0g, y1g = lo(xs), hi(xs), lo(ys), hi(ys)
+SPACING_CM = 8000.0  # ~80m between domes -> heavy overlap at R65-70m
+nx = max(1, int(round((x1g - x0g) / SPACING_CM)) + 1)
+ny = max(1, int(round((y1g - y0g) / SPACING_CM)) + 1)
+while nx * ny > MAX_STATIONS:  # trim the longer axis until within the station budget
+    if nx >= ny and nx > 1:
+        nx -= 1
+    elif ny > 1:
+        ny -= 1
+    else:
+        break
+_axis = lambda k, a, b: [(a + b) / 2.0] if k == 1 else [a + (b - a) * i / (k - 1) for i in range(k)]
+foci = [(x, y) for y in _axis(ny, y0g, y1g) for x in _axis(nx, x0g, x1g)]
+DOME_ELEV = "20,36,52,68" if span > 120 else "16,32,50,66"
+DOME_NAZ = 30
+print(f"[any] dome grid {nx}x{ny} = {len(foci)} domes, elev {DOME_ELEV} naz {DOME_NAZ}")
 
 stations = []
 for i, (fx, fy) in enumerate(foci):
     stations.append({"name": f"s{i+1}", "kind": "full",
                      "focus": [fx, fy, focus_z], "radius": station_R,
-                     "settle": 120, "converge": 12, "est_poses": 412})
+                     "elev": DOME_ELEV, "naz": DOME_NAZ, "ground": 0,
+                     "settle": 120, "converge": 12,
+                     "est_poses": len(DOME_ELEV.split(",")) * DOME_NAZ})
 for i, (ox, oy) in enumerate(orbit_targets):
     stations.append({"name": f"o{i+1}", "kind": "orbit",
                      "focus": [ox, oy, ground_z + 2500.0], "radius": 2200.0,
