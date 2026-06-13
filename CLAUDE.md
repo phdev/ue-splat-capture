@@ -554,6 +554,25 @@ and the island RE-trained under the exact same recipe with zero regression
   pocket), then decimate to ~3.2M by opacity for a 38MB SOG. LAW: a buried DOME
   station needs MORE domes (grid), not just probe/displace — displace fixes buried
   ORBIT rings, not under-covered dome cells.
+- **scene39 FLOATER REDUCTION — two distinct artifacts, two different fixes.**
+  (1) FREE-SPACE floaters/wisps (isolated low-support gaussians hanging in air):
+  removed for FREE in post by `despike_ply.py` SOR (the historic "single biggest
+  win") + haze, run LENIENT so it spares foliage — scene39 recipe
+  `99 99 2.0 0.12 0.025 <content-box> 1.0 1.0 1.3 16 0` (spike/glint/CC DISABLED —
+  they eat the foliage shell; SOR 1.3 peels only isolated air-floaters; haze
+  big+faint). 11.8M->5.2M, visibly cleaner sky, rock/foliage untouched; this is now
+  the cleaning step (better than the crude opacity-decimate). (2) NEAR-FIELD FOLIAGE
+  STREAK (foreground vegetation as soft motion-blur streaks): NOT cleanable in post —
+  it is the per-view render-NOISE problem (SceneCapture2D doesn't temporally
+  accumulate Lumen/TSR, so each view disagrees on foliage -> 3DGS sprays spikes
+  exactly there). ROOT-CAUSE fix is CAPTURE-SIDE temporal averaging
+  (UE_AVG_SAMPLES=N + scripts/average_samples.py; noise ~1/sqrt(N), N=16 -> ~25%;
+  renders are ~0.37s so 16x adds only ~1.5-2h to the capture, NOT 16x — the per-pose
+  settle dominates). any_pipeline does NOT set UE_AVG_SAMPLES yet — wiring it in is
+  the next quality lever for the canyon. Trainer-side alternative: Mip-Splatting
+  (brush --render-mode mip) softens foliage spikes but loses depth-primary's
+  enclosed-scene robustness (risky for the bowl). SH degree 1 in the SOG (vs -H 0)
+  may cut view-dependent shimmer on wet rock at +size.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
