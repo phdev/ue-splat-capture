@@ -81,17 +81,34 @@ def send_capture(name, cfg, target="ue_capture/capture_editor.py"):
 
 
 def wait_capture(out_dir, est_poses, label):
-    """Capture completion = ue_poses.json written (capture_editor's last act)."""
-    deadline = time.time() + max(1200, est_poses * 25 + 600)
-    while time.time() < deadline:
+    """Wait until ue_poses.json is written (capture_editor's last act). STALL-BASED,
+    not a fixed deadline: as long as new frames keep appearing the capture is alive
+    and we keep waiting (est_poses is only a hint — UE rigs can emit far more than
+    estimated). We give up ONLY on a real stall (no new frame for STALL_S) or a hard
+    safety cap. A premature give-up is dangerous: the loop would launch the next
+    station while this one is still writing -> two captures collide in the editor's
+    single tick-driven state machine (this bit burn #2's first launch)."""
+    STALL_S = 480          # no new frame for 8 min = dead
+    HARD_CAP_S = 9000      # 2.5h absolute ceiling per station
+    t0 = last_change = time.time()
+    last_n = -1
+    while time.time() - t0 < HARD_CAP_S:
         if os.path.exists(f"{out_dir}/ue_poses.json"):
             n = len(glob.glob(f"{out_dir}/images/*.png"))
             print(f"[{label}] DONE: {n} frames")
             return True
         n = len(glob.glob(f"{out_dir}/images/*.png"))
-        print(f"[{label}] {n}/{est_poses} frames...", flush=True)
+        now = time.time()
+        if n != last_n:
+            last_n = n
+            last_change = now
+        idle = now - last_change
+        print(f"[{label}] {n}/~{est_poses} frames (idle {int(idle)}s)...", flush=True)
+        if idle > STALL_S:
+            print(f"[{label}] STALL: {n} frames, no new frame for {STALL_S}s — giving up")
+            return False
         time.sleep(30)
-    print(f"[{label}] TIMEOUT waiting for {out_dir}/ue_poses.json")
+    print(f"[{label}] HARD-CAP {HARD_CAP_S}s waiting for {out_dir}/ue_poses.json")
     return False
 
 

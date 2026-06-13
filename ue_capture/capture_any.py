@@ -93,10 +93,14 @@ print(f"[any] tall clusters (m): {[(round(x/100), round(y/100)) for x, y in orbi
 # keep mids + one steep-down ring for the floor (so no separate ground-dense pass).
 cx0, cy0 = (lo(xs) + hi(xs)) / 2.0, (lo(ys) + hi(ys)) / 2.0
 span = max(ext_x, ext_y)
-station_R = 7000.0 if span > 120 else 6500.0
+# Grid domes are ORBIT-kind ring-domes (UE_SPIRE_ORBIT), NOT UE_FULL: UE_FULL is a
+# hardcoded 441-pose compound rig (dome+wide+nadir) with island-ground Z heights —
+# it ignores elev/naz and plants cameras below a canyon floor. A ring-dome takes a
+# cell center + radius + enclosed elevations and yields exactly elev*naz poses.
+DOME_R = 5000.0  # 50m ring -> overlaps neighbors at ~80m spacing, stays in open air
 focus_z = ground_z + 1000.0
 x0g, x1g, y0g, y1g = lo(xs), hi(xs), lo(ys), hi(ys)
-SPACING_CM = 8000.0  # ~80m between domes -> heavy overlap at R65-70m
+SPACING_CM = 8000.0  # ~80m between domes
 nx = max(1, int(round((x1g - x0g) / SPACING_CM)) + 1)
 ny = max(1, int(round((y1g - y0g) / SPACING_CM)) + 1)
 while nx * ny > MAX_STATIONS:  # trim the longer axis until within the station budget
@@ -110,14 +114,14 @@ _axis = lambda k, a, b: [(a + b) / 2.0] if k == 1 else [a + (b - a) * i / (k - 1
 foci = [(x, y) for y in _axis(ny, y0g, y1g) for x in _axis(nx, x0g, x1g)]
 DOME_ELEV = "20,36,52,68" if span > 120 else "16,32,50,66"
 DOME_NAZ = 30
-print(f"[any] dome grid {nx}x{ny} = {len(foci)} domes, elev {DOME_ELEV} naz {DOME_NAZ}")
+print(f"[any] dome grid {nx}x{ny} = {len(foci)} ring-domes, elev {DOME_ELEV} naz {DOME_NAZ}")
 
 stations = []
 for i, (fx, fy) in enumerate(foci):
-    stations.append({"name": f"s{i+1}", "kind": "full",
-                     "focus": [fx, fy, focus_z], "radius": station_R,
-                     "elev": DOME_ELEV, "naz": DOME_NAZ, "ground": 0,
-                     "settle": 120, "converge": 12,
+    stations.append({"name": f"s{i+1}", "kind": "orbit",
+                     "focus": [fx, fy, focus_z], "radius": DOME_R,
+                     "elev": DOME_ELEV, "naz": DOME_NAZ,
+                     "settle": 60, "converge": 10,
                      "est_poses": len(DOME_ELEV.split(",")) * DOME_NAZ})
 for i, (ox, oy) in enumerate(orbit_targets):
     stations.append({"name": f"o{i+1}", "kind": "orbit",
