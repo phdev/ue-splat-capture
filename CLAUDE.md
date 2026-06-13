@@ -501,6 +501,29 @@ and the island RE-trained under the exact same recipe with zero regression
   tier); probe→prep stages are the proven rb/island mechanics folded in verbatim,
   but the full loop hasn't burned a complete capture end-to-end yet — babysit the
   first real run.
+- **FIRST END-TO-END BURN (scene39 attempt, NOT deployed): pipeline works, the RIG
+  under-covers enclosed pockets.** Ran any_pipeline on a 196×198m amphitheater
+  (3 dome + 5 orbit + far, --max-stations 4 --max-orbits 5). The whole loop ran
+  clean — probe→displace (o5 ring auto-recovered from buried), capture (1,260
+  usable frames after the 0.40 filter), merge, prep, A100 depth-primary train (40K,
+  4.9M gaussians/1.22GB), pod gate, parallel chunk pull, pod delete. BUT the result
+  was LATERAL to scene37, not showcase: pod-gate mean invdepth MAE **0.0625 > scene37
+  0.037**, and the per-view split was BIMODAL — orbit/far/s3 views at 0.004-0.014
+  (island-quality!) but the **s1 dome landed in an enclosed pocket** (kept only
+  136/562 frames, 76% buried) and reconstructed as FOG (s1 views MAE 0.31/0.14),
+  dragging the mean. Viewer QA confirmed: sharp near well-covered stations, foreground
+  floater-smear + hazy wide views elsewhere. ROOT CAUSE: `capture_any.py` caps dome
+  stations at **3** (the major-axis spread only generates 3 foci) regardless of
+  --max-stations, and uses island-tuned elevations (8°..76° + ground-dense) that, in
+  an enclosed bowl, bury low/over-rim poses and under-cover pockets between the 3
+  domes. THE NEXT LEVER (burn #2, not yet built): a dome-GRID rig — 4-6 dome stations
+  on a 2D grid scaled to area (not 3 on an axis) + enclosed-tuned elevations (drop 8°
+  and the over-rim poses) + per-station radius adapted to local enclosure. Lesson:
+  probe/displace fixes buried ORBIT rings well, but a buried DOME station needs the
+  grid (more stations), not just displacement. Assets kept: /tmp/show_chunks/
+  point_cloud.ply (4.9M), /tmp/scene39.sog (36MB), /tmp/show_gate.tar.gz. The
+  bimodal gate is the diagnostic — read PER-VIEW MAE, never just the mean, to tell a
+  localized coverage hole from a global failure.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
