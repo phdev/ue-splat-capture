@@ -257,31 +257,45 @@ def _tick(delta_seconds):
 
         if _S["phase"] == "shoot":
             p = _S["poses"][_S["i"]]
-            _S["comp"].capture_scene()
             base = f"cam_{p['index']:03d}"
-            unreal.RenderingLibrary.export_render_target(_S["world"], _S["rt"], _S["out_dir"] + "/images", base)
-            raw = os.path.join(_S["out_dir"], "images", base); png = raw + ".png"
-            if os.environ.get("UE_HDR_COLOR") == "1":
-                # float RT exports a true EXR; keep it as .exr and record the FUTURE
-                # .png path -- scripts/hdr_to_training_png.py writes it pre-dataset.
-                exr = raw + ".exr"
-                if os.path.exists(raw) and not os.path.exists(exr):
-                    os.replace(raw, exr)
-            elif os.path.exists(raw) and not os.path.exists(png):
-                os.replace(raw, png)
+            avg = _S["avg"]
+            hdr = os.environ.get("UE_HDR_COLOR") == "1"
+            # per-sample color export (cam_IDX_SS when averaging, else cam_IDX)
+            sbase = f"{base}_{_S['sample']:02d}" if avg > 1 else base
+            _S["comp"].capture_scene()
+            unreal.RenderingLibrary.export_render_target(_S["world"], _S["rt"], _S["out_dir"] + "/images", sbase)
+            sraw = os.path.join(_S["out_dir"], "images", sbase)
+            if hdr:
+                # float RT exports a true EXR; keep it .exr (HDR averaging not supported
+                # with multi-sample -- use avg=1 with UE_HDR_COLOR). Record future .png.
+                if os.path.exists(sraw) and not os.path.exists(sraw + ".exr"):
+                    os.replace(sraw, sraw + ".exr")
+            elif os.path.exists(sraw) and not os.path.exists(sraw + ".png"):
+                os.replace(sraw, sraw + ".png")
+            # more color samples for this pose? capture next on the following tick so
+            # Lumen GI / TSR noise re-randomises between samples.
+            if avg > 1 and _S["sample"] + 1 < avg:
+                _S["sample"] += 1
+                _S["wait"] = 1
+                return
+            _S["sample"] = 0
+            # geometric depth: one capture is enough (no averaging)
             depth_path = None
             if _S.get("dcomp"):
-                _S["dcomp"].capture_scene()                 # depth is geometric; one capture is enough
+                _S["dcomp"].capture_scene()
                 unreal.RenderingLibrary.export_render_target(_S["world"], _S["drt"], _S["out_dir"] + "/depth", base)
                 draw = os.path.join(_S["out_dir"], "depth", base); dexr = draw + ".exr"
                 if os.path.exists(draw) and not os.path.exists(dexr):
                     os.replace(draw, dexr)
                 depth_path = dexr
+            # file_path records the FINAL averaged cam_IDX.png (average_samples.py writes
+            # it post-capture from the cam_IDX_SS samples; for avg=1 it already exists).
+            png = os.path.join(_S["out_dir"], "images", base + ".png")
             _S["frames"].append({"file_path": png, "split": p["split"], "depth_path": depth_path,
                                  "location_cm": export.location_from_actor(unreal, _S["actor"]),
                                  "basis_ue": export.basis_from_actor(unreal, _S["actor"])})
             if (_S["i"] + 1) % 10 == 0:
-                unreal.log(f"[ed] captured {_S['i']+1}/{len(_S['poses'])}")
+                unreal.log(f"[ed] captured {_S['i']+1}/{len(_S['poses'])} (avg {avg})")
             _S["i"] += 1
             _S["phase"] = "move" if _S["i"] < len(_S["poses"]) else "done"
             return
@@ -554,6 +568,10 @@ def main():
                "poses": poses, "frames": [], "comp": comp, "rt": rt, "actor": actor, "world": world,
                "out_dir": out_dir, "caps": caps, "train_res": train_res, "hfov": hfov,
                "focus": focus, "radius": radius,
+               # UE_AVG_SAMPLES>1: export N color samples per pose (cam_IDX_SS.png),
+               # one per tick so Lumen/TSR noise re-randomises; scripts/average_samples.py
+               # folds them -> cam_IDX.png post-capture (kills foliage spike-floaters).
+               "avg": max(1, int(os.environ.get("UE_AVG_SAMPLES", "1"))), "sample": 0,
                "dactor": dactor, "dcomp": dcomp, "drt": drt,
                # completeness gate: require tall geometry (spire) loaded before capturing.
                "min_top": float(os.environ.get("UE_MIN_SCENE_TOP_CM", "0")), "ext": 0,

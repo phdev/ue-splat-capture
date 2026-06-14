@@ -141,6 +141,8 @@ def station_cfg(st, plan, probe=False):
                 "UE_SETTLE_TICKS": str(st["settle"]),
                 "UE_CONVERGE_TICKS": str(st["converge"]),
                 "UE_CAPTURE_OUT": f"{REPO}/out/{plan['prefix']}_{st['name']}"})
+    if plan.get("avg", 1) > 1:   # temporal averaging: N color samples/pose -> denoise foliage
+        cfg["UE_AVG_SAMPLES"] = str(plan["avg"])
     if st["kind"] == "full":
         cfg.update({"UE_FULL": "1",
                     "UE_FOCUS_CM": f"{fx},{fy},{fz}",
@@ -285,6 +287,7 @@ def main():
                     help="captures already on disk; merge+prep only")
     ap.add_argument("--max-stations", default="", help="override UA_MAX_STATIONS (denser dome coverage)")
     ap.add_argument("--max-orbits", default="", help="override UA_MAX_ORBITS (denser cluster orbits)")
+    ap.add_argument("--avg", type=int, default=1, help="UE_AVG_SAMPLES per pose (temporal averaging; denoises foliage)")
     args = ap.parse_args()
 
     if not args.skip_scout and not args.from_merge:
@@ -305,6 +308,8 @@ def main():
         if not os.path.exists(PLAN):
             sys.exit("scout produced no plan (editor down / level not loaded?)")
     plan = json.load(open(PLAN))
+    if args.avg > 1:
+        plan["avg"] = args.avg
     print(f"[plan] {json.dumps({k: v for k, v in plan.items() if k != 'stations'})}")
     for st in plan["stations"]:
         print(f"[plan]   {st}")
@@ -330,6 +335,10 @@ def main():
             shutil.rmtree(out_dir, ignore_errors=True)
             send_capture(st["name"], station_cfg(st, plan))
             wait_capture(out_dir, st["est_poses"], f"capture {st['name']}")
+            if plan.get("avg", 1) > 1:   # fold cam_IDX_SS.png samples -> cam_IDX.png
+                r = subprocess.run([sys.executable, f"{REPO}/scripts/average_samples.py",
+                                    f"{out_dir}/images"], capture_output=True, text=True)
+                print(f"[avg {st['name']}] {(r.stdout or '').strip().splitlines()[-1] if r.stdout else 'done'}")
 
     cap_dir = merge(plan)
     tar = prep(plan, cap_dir)

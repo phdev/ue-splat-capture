@@ -124,10 +124,13 @@ for i, (fx, fy) in enumerate(foci):
                      "settle": 60, "converge": 10,
                      "est_poses": len(DOME_ELEV.split(",")) * DOME_NAZ})
 for i, (ox, oy) in enumerate(orbit_targets):
+    # TIGHT spire orbits (R16m, full-column elevations) seal the rock-column SHELLS
+    # for close viewing — scene39 showed medium-distance domes leave spires see-through
+    # up close (the island sealed its spire with exactly this close-orbit recipe).
     stations.append({"name": f"o{i+1}", "kind": "orbit",
-                     "focus": [ox, oy, ground_z + 2500.0], "radius": 2200.0,
-                     "elev": "-5,15,35,55", "naz": 24,
-                     "settle": 20, "converge": 10, "est_poses": 96})
+                     "focus": [ox, oy, ground_z + 2500.0], "radius": 1600.0,
+                     "elev": "-25,-5,15,35,55,75", "naz": 30,
+                     "settle": 20, "converge": 12, "est_poses": 180})
 stations.append({"name": "far", "kind": "orbit",
                  "focus": [cx0, cy0, ground_z + 1500.0],
                  "radius": min(60000.0, max(20000.0, span * 100 * 1.25)),
