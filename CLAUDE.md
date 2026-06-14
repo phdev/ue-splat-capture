@@ -577,6 +577,27 @@ and the island RE-trained under the exact same recipe with zero regression
   shipping denser (4.5M vs 3.2M) adds only marginal foliage fullness at +24MB (62MB,
   too heavy for mobile). Neither touches the foliage streak. So the ONLY real lever
   left for the streak is capture-side temporal averaging — everything else is a wash.
+- **scene40 = the comprehensive capture-side fix (DEPLOYED).** Two capture-engine
+  additions, both validated before the burn: (a) TEMPORAL AVERAGING in-editor —
+  capture_editor's shoot phase exports N color samples/pose (cam_IDX_SS, one per tick
+  so Lumen/TSR noise re-randomises; depth once); any_pipeline --avg N runs
+  scripts/average_samples.py per station to fold them; UE_AVG_SAMPLES=8 -> clearly
+  cleaner foliage (validated: samples differ ~1.4/255). (b) TIGHT SPIRE ORBITS —
+  capture_any cluster orbits tightened to R16m, elev -25..75 (full column), naz30
+  (~180 poses each) = the close shell coverage scene39 lacked (1233 frames incl 499
+  close spire-orbit frames). Results: spire holes MODESTLY sealed (bg-flip interior
+  holes 9498->8632 at the test pose; rock columns visibly more solid) + foliage
+  denoised; pod-gate spires 0.0018-0.003. KEY SIZING LAW: a sealed shell needs FULL
+  density (~5.2M) — OPACITY-decimation re-opens holes (drops the faint shell:
+  4M-opacity re-opened to 10987 > scene39's 9498), so reduce with VOXEL-downsample
+  (4cm/top-1 preserves shell coverage, holds 8632) -> 65MB. HONEST RESIDUAL: the
+  close orbits seal the ROCK faces but the remaining see-through is largely
+  FOLIAGE-ON-COLUMN leaf-gaps, inherent to vegetation in 3DGS (no capture fixes real
+  leaf gaps), and depth-primary doesn't push opacity hard — so transparency is
+  IMPROVED not eliminated; a true opacity seal would need opacity-regularized training
+  (MCMC-style, which diverges on this foliage). Tight R16m orbits bury often ->
+  probe/displace lifts them (o1 displaced 2x, still kept 121 frames). avg=8 ~2x'd
+  capture time (~10h). scene39 kept as the lighter 38MB option.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
