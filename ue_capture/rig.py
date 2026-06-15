@@ -87,6 +87,52 @@ def interior_walk(waypoints_cm, n_steps=8, height_cm=130.0, look_ahead=0.12,
     return poses
 
 
+def path_fan(waypoints_cm, step_cm=350.0, eye_cm=480.0, look_ahead_cm=700.0,
+             fans_deg=((0.0, -6.0), (-42.0, -3.0), (42.0, -3.0), (0.0, -33.0), (-16.0, 12.0)),
+             heldout_every=8, start_index=0):
+    """Cameras following an OPEN polyline (a road/ditch route), emitting a FAN per
+    step so corridor surfaces get the multi-view baseline 3DGS needs (forward motion
+    = baseline; the yaw/pitch fan = walls/floor/up coverage). Waypoints are [x,y,z]
+    with z the LOCAL GROUND height (cm); cameras sit eye_cm above it (terrain-follow).
+    fans_deg = (yaw_offset, pitch) per camera relative to the travel direction:
+    default = ahead-slightly-down + left + right + floor + up-ahead (spire tops)."""
+    pts = [list(p) for p in waypoints_cm]
+    seg = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1)]
+    cum = [0.0]
+    for s in seg:
+        cum.append(cum[-1] + s)
+    total = cum[-1]
+
+    def at(s):  # interpolate [x,y,groundz] at arc-length s (xy metric)
+        s = max(0.0, min(total, s))
+        j = 0
+        while j < len(cum) - 2 and cum[j + 1] < s:
+            j += 1
+        f = (s - cum[j]) / max(cum[j + 1] - cum[j], 1e-6)
+        return [pts[j][k] * (1 - f) + pts[j + 1][k] * f for k in range(3)]
+
+    n_steps = max(2, int(total // step_cm))
+    poses = []
+    idx = start_index
+    for k in range(n_steps + 1):
+        s = total * k / n_steps
+        p = at(s)
+        pa = at(s + look_ahead_cm)
+        base_yaw = math.atan2(pa[1] - p[1], pa[0] - p[0])
+        cam = [p[0], p[1], p[2] + eye_cm]
+        for yaw_off, pitch in fans_deg:
+            ya = base_yaw + math.radians(yaw_off)
+            pr = math.radians(pitch)
+            tgt = [cam[0] + math.cos(pr) * math.cos(ya) * look_ahead_cm,
+                   cam[1] + math.cos(pr) * math.sin(ya) * look_ahead_cm,
+                   cam[2] + math.sin(pr) * look_ahead_cm]
+            split = "heldout" if (heldout_every and idx % heldout_every == 1) else "train"
+            poses.append({"index": idx, "kind": "path", "split": split,
+                          "location_cm": cam[:], "target_cm": tgt})
+            idx += 1
+    return poses
+
+
 def _dist(a, b):
     return math.sqrt(sum((a[i] - b[i]) ** 2 for i in range(len(a))))
 

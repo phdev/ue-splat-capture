@@ -507,7 +507,23 @@ def main():
             unreal.log_error(f"[ed] UE_DEPTH setup FAILED ({e}) -- continuing RGB-only")
             dactor = dcomp = drt = None
 
-    if probe:
+    if os.environ.get("UE_PATH_FILE"):
+        # PATH flythrough: a road/ditch polyline (waypoints carry local ground z) ->
+        # a forward+side+floor camera fan per step. focus/radius are derived from the
+        # path bbox so the settle/WP-stream/aabb machinery covers the whole corridor.
+        import json as _json
+        _pf = _json.load(open(os.environ["UE_PATH_FILE"]))
+        _wps = _pf["waypoints"]
+        poses = rig.path_fan(_wps, step_cm=float(os.environ.get("UE_PATH_STEP", "350")),
+                             eye_cm=float(os.environ.get("UE_PATH_EYE", "480")))
+        for i, p in enumerate(poses):
+            p["index"] = i
+        _xs = [w[0] for w in _wps]; _ys = [w[1] for w in _wps]; _zs = [w[2] for w in _wps]
+        focus = [sum(_xs) / len(_xs), sum(_ys) / len(_ys), sum(_zs) / len(_zs)]
+        radius = max(max(_xs) - min(_xs), max(_ys) - min(_ys)) / 2.0 + 3000.0
+        unreal.log(f"[ed] PATH: {len(_wps)} waypoints -> {len(poses)} fan poses; "
+                   f"focus={[round(c) for c in focus]} radius={radius/100:.0f}m")
+    elif probe:
         # LOW full-azimuth ring so the probe actually frames the hero spire silhouette
         # (the old elev 20/45 x az0/90/180/270 looked down at the pit and missed it).
         pelev = tuple(float(x) for x in os.environ.get("UE_PROBE_ELEV", "8,22").split(","))
