@@ -507,7 +507,23 @@ def main():
             unreal.log_error(f"[ed] UE_DEPTH setup FAILED ({e}) -- continuing RGB-only")
             dactor = dcomp = drt = None
 
-    if os.environ.get("UE_PATH_FILE"):
+    if os.environ.get("UE_POSES_FILE"):
+        # explicit pose list [{location_cm:[x,y,z], target_cm:[x,y,z]}] -> capture exactly
+        # these (used by the VANTAGE rig: a converging slab from a fixed viewpoint). focus/
+        # radius derived from the targets/locations for the settle + aabb machinery.
+        import json as _json
+        _pl = _json.load(open(os.environ["UE_POSES_FILE"]))
+        poses = []
+        for i, p in enumerate(_pl):
+            poses.append({"index": i, "kind": "vantage",
+                          "split": p.get("split", "heldout" if i % 8 == 1 else "train"),
+                          "location_cm": p["location_cm"], "target_cm": p["target_cm"]})
+        _tg = [p["target_cm"] for p in poses]; _lo = [p["location_cm"] for p in poses]
+        focus = [sum(c[k] for c in _tg) / len(_tg) for k in range(3)]
+        _allx = [c[0] for c in _lo] + [c[0] for c in _tg]; _ally = [c[1] for c in _lo] + [c[1] for c in _tg]
+        radius = max(max(_allx) - min(_allx), max(_ally) - min(_ally)) / 2.0 + 2000.0
+        unreal.log(f"[ed] POSES_FILE: {len(poses)} explicit poses; focus={[round(c) for c in focus]} r={radius/100:.0f}m")
+    elif os.environ.get("UE_PATH_FILE"):
         # PATH flythrough: a road/ditch polyline (waypoints carry local ground z) ->
         # a forward+side+floor camera fan per step. focus/radius are derived from the
         # path bbox so the settle/WP-stream/aabb machinery covers the whole corridor.
