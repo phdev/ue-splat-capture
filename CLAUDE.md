@@ -458,6 +458,20 @@ brush on the SAME complete-coverage data, and visibly sharper foliage/rock.**
   distance:d})` or write a settings json with that camera. Enabled by an index.js patch
   (get/setCameraState were ?debug-only) + a `?v=`-versioned module import — BUMP `?v=` in
   index.html whenever index.js is patched or browsers/CDN serve the stale bundle.
+- **Opening-camera HOLD (`startMode:"hold"`):** the viewer's default `startMode`
+  ("default"/"none"/"static" — all the same) idle auto-orbits at **~18°/s from load**, so a
+  scene can NOT reliably OPEN on a chosen vantage (the json's `initial.position/target` set
+  height/pitch/distance/target but the spin overwrites yaw immediately). To open *locked* on a
+  pose, set the settings json `startMode:"hold"`: an index.html block (right after the
+  `window.sse` settings fetch) computes the orbit snapshot from `cameras[0].initial`
+  (`pitch=asin(fwd.y)`, `yaw=atan2(-fwd.x,-fwd.z)`, `distance=|target-eye|`) and calls
+  `setCameraState({...,mode:"orbit"})` on a 100ms poll until the API exists — freezing the
+  opening frame; the user can still drag afterward. Gated on `"hold"`, so every other scene
+  keeps its idle spin. **scene38 ships this** to OPEN at the PlayerStart spawn vantage
+  (eye `[60,11,-40]`→target `[0,15,0]`, fov 60 — found empirically in the live viewer because
+  the deployed SOG is a normalized `[-4,4]` frame with no recoverable world transform). NOTE:
+  per-scene camera scales vary wildly (scene40 frames at d≈135, scene38 at d≈72) — never reuse
+  one scene's camera numbers for another; frame each empirically against its own SOG.
 
 ## UNIVERSAL PIPELINE — capture + train ANY UE level (the scene37/38 recipe)
 ONE recipe now covers both open hero scenes and enclosed/large regions. Validated
