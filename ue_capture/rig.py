@@ -88,7 +88,8 @@ def interior_walk(waypoints_cm, n_steps=8, height_cm=130.0, look_ahead=0.12,
 
 
 def path_fan(waypoints_cm, step_cm=350.0, eye_cm=480.0, look_ahead_cm=700.0,
-             fans_deg=((0.0, -6.0), (-42.0, -3.0), (42.0, -3.0), (0.0, -33.0), (-16.0, 12.0)),
+             fans_deg=((0.0, -8.0), (-30.0, -6.0), (30.0, -6.0), (-58.0, -3.0), (58.0, -3.0),
+                       (0.0, -36.0), (0.0, 16.0)),
              heldout_every=8, start_index=0):
     """Cameras following an OPEN polyline (a road/ditch route), emitting a FAN per
     step so corridor surfaces get the multi-view baseline 3DGS needs (forward motion

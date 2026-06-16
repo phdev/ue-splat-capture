@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--step", default="400")
     ap.add_argument("--eye", default="480")
     ap.add_argument("--init", default="300000")
+    ap.add_argument("--ev", default="10", help="UE_CAPTURE_EV (LOWER = brighter; shaded interiors need ~8.5)")
     ap.add_argument("--from-capture", action="store_true", help="capture on disk; average+prep only")
     args = ap.parse_args()
     out_dir = f"{REPO}/out/{args.prefix}"
@@ -66,7 +67,7 @@ def main():
     if not args.from_capture:
         cfg = {"UE_PATH_FILE": args.path, "UE_PATH_STEP": args.step, "UE_PATH_EYE": args.eye,
                "UE_DEPTH": "1", "UE_NOSKY": "1", "UE_CAP_RES": "1536", "UE_TRAIN_RES": "1536",
-               "UE_CAPTURE_EV": "10", "UE_CONVERGE_TICKS": "12", "UE_HFOV": "75",
+               "UE_CAPTURE_EV": args.ev, "UE_CONVERGE_TICKS": "12", "UE_HFOV": "75",
                "UE_SKIP_LOAD": "1", "UE_SKIP_PCG": "1", "UE_SETTLE_TICKS": "120",
                "UE_MIN_SCENE_TOP_CM": "0", "UE_NO_QUIT": "1", "UE_CAPTURE_OUT": out_dir}
         if args.avg > 1:
