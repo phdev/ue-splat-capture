@@ -626,6 +626,24 @@ and the island RE-trained under the exact same recipe with zero regression
   downsample (4cm/top1) ~6M/71MB; opening camera looks down the route; the cinematic
   VIDEO (render path frames -> ffmpeg, mild eq brighten) is the primary deliverable.
   scene40 stays default; scene42 is the flythrough option.
+- **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
+  of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
+  `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a
+  look dir, looking at a few forward depth foci) from a fixed viewpoint — to
+  reconstruct e.g. a PlayerStart's opening view. The mechanics all work (found the
+  PlayerStart via class 'PlayerStart' -> get_actor_location/forward_vector; UE_POSES_FILE
+  captured 165 poses; trained). BUT the RESULT is noisy/floater-heavy from every angle:
+  a narrow slab has too little baseline to constrain the AIR between cameras and scene,
+  so the optimizer fills it with floaters that SOR can't remove (they're not faint), and
+  the gaussians concentrate on the near foreground (high parallax) not the distant
+  subject (low parallax). LESSON: a single vantage is NOT enough for a clean splat —
+  to capture "the view from point X", ORBIT the content X looks at (wide baseline ->
+  clean) and just OPEN the viewer at X's pose. Also: a focused/concentrated capture
+  needs STANDARD densify (0.00013), never large-tier (0.00006 exploded to 15M gaussians
+  / OOM'd an 80GB card by iter 12K even at 165 imgs); and `argparse` eats a `--fwd`
+  value that starts with `-` -> pass `--fwd=-0.1,...` (= form). Coordinate replay:
+  world cm -> ply m (x/100,-y/100,z/100), viewer = (ply-ctr) as (x,z,-y); a direction
+  flips y only. (A40 is ~4x slower than A100/H100 for these trains — force fast cards.)
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
