@@ -36,7 +36,7 @@ exec(compile(open(_f).read(), _f, "exec"), {{"__file__": _f, "__name__": "__main
 
 
 def wait_capture(out_dir, label="path"):
-    STALL_S, HARD = 600, 14400
+    STALL_S, HARD = 900, 28800   # avg=8 x hundreds of fan poses is slow (~5-7h)
     t0 = last_change = time.time(); last_n = -1
     while time.time() - t0 < HARD:
         if os.path.exists(f"{out_dir}/ue_poses.json"):
