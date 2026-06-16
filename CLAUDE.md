@@ -640,6 +640,26 @@ and the island RE-trained under the exact same recipe with zero regression
   downsample (4cm/top1) ~6M/71MB; opening camera looks down the route; the cinematic
   VIDEO (render path frames -> ffmpeg, mild eq brighten) is the primary deliverable.
   scene40 stays default; scene42 is the flythrough option.
+- **INTERACTIVE route input (let the USER draw the path in-editor).** Instead of the
+  Dijkstra auto-route, the user shapes a route by dragging a spline. `scripts/path_rail_seed.py`
+  (run in the warm editor via `ue_exec.py`) spawns a **Camera Rig Rail** in the CURRENT scene,
+  seeded along the ground in front of the live viewport camera; `scripts/path_rail_read.py`
+  samples that spline densely by arc-length, snaps each point to terrain, and writes the same
+  `{"waypoints":[[x,y,groundz]],"ground_cm":...}` route `capture_path.py` consumes. GOTCHAS
+  (cost real time): (a) the rig-rail class is NOT in the `unreal` Python namespace in 5.7 —
+  `unreal.CineCameraRigRail`/`CameraRig_Rail` AttributeError; load it by path:
+  `unreal.load_class(None,"/Script/CinematicCamera.CameraRig_Rail")` (CineCameraRigRail does
+  NOT load; plain CameraRig_Rail does), then `spawn_actor_from_class(cls,...)` and fetch its
+  spline generically via `rig.get_components_by_class(unreal.SplineComponent)[0]` (the typed
+  `get_rail_spline_component()` isn't bound). (b) `HitResult` fields are protected/unbound in
+  Python — no `.location`/`.impact_point`, no `GameplayStatics.break_hit_result`,
+  `project_point_to_navigation` returns None without a navmesh; the ONLY working unpack is
+  `hit_result.to_tuple()` -> index [0]=blocking_hit, [4]=location, [5]=impact_point. Use a
+  down line-trace (`SystemLibrary.line_trace_single`, TRACE_TYPE_QUERY1) + `to_tuple()[5].z`
+  for ground. (c) seed with FEW sparse control points (easy to drag) and re-sample the CURVE
+  at read time (fine `SAMPLE_CM` << capture `step_cm`). (d) `Actor.add_component_by_class`
+  isn't bound in 5.7 — spawn the real rail class instead of bolting a SplineComponent on a
+  bare Actor. Actor tag "CAPTURE_PATH" + label "CAPTURE_PATH_RAIL" make it findable on re-read.
 - **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
   of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
   `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a
