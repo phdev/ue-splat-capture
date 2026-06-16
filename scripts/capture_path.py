@@ -80,10 +80,12 @@ def main():
         print((r.stdout or "")[-500:])
         if not wait_capture(out_dir):
             sys.exit("path capture failed")
-        if args.avg > 1:
-            r = subprocess.run([sys.executable, f"{REPO}/scripts/average_samples.py", f"{out_dir}/images"],
-                               capture_output=True, text=True)
-            print((r.stdout or "").strip().splitlines()[-1] if r.stdout else "[avg] done")
+    # fold N samples/pose -> cam_IDX.png. Idempotent (no-op once folded), so it runs
+    # in --from-capture mode too (the bug: averaging was skipped on resume).
+    if args.avg > 1:
+        r = subprocess.run([sys.executable, f"{REPO}/scripts/average_samples.py", f"{out_dir}/images"],
+                           capture_output=True, text=True)
+        print((r.stdout or "").strip().splitlines()[-1] if r.stdout else "[avg] done")
 
     ed = f"{REPO}/out/{args.prefix}_train/ed"
     import shutil
