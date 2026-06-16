@@ -598,6 +598,34 @@ and the island RE-trained under the exact same recipe with zero regression
   (MCMC-style, which diverges on this foliage). Tight R16m orbits bury often ->
   probe/displace lifts them (o1 displaced 2x, still kept 121 frames). avg=8 ~2x'd
   capture time (~10h). scene39 kept as the lighter 38MB option.
+- **PATH FLYTHROUGH capture (scene41 draft / scene42 v2 — the "road/ditch" approach).**
+  Instead of fighting a full enclosed-scene reconstruction, capture ALONG a route and
+  view on-rails. NEW rig `rig.path_fan` (forward+side+floor+up camera FAN per step,
+  terrain-following eye height) + `capture_editor` UE_PATH mode (reads a waypoint json,
+  derives focus/radius from the path bbox) + driver `scripts/capture_path.py`
+  (UE_PATH capture -> average -> prep_depth_dataset -> tar -> pod cmds). ROUTE: a
+  least-vegetation corridor found by Dijkstra over a foliage-density grid (the bowl is
+  mostly OPEN green with foliage in clumps; route the open ground past the spires so
+  the camera isn't buried). WORKS — scene42 is a navigable eye-level canyon tour where
+  scene40 (captured from outside/above) renders murk. BUT draft quality: the path-fan
+  gives lighter per-surface coverage than an orbit (gate ~0.04-0.05, dragged by 2 far
+  views staring across the bowl; 10/12 views 0.0003-0.018), and eye-level views across
+  an open bowl are inherently soft. BRIGHTNESS: the bowl interior is SHADOWED (walls
+  occlude the sun) so EV10 is dim down there -> EV-probe found EV8.5 (lower=brighter)
+  lifts non-bg luminance ~2-3x with only 0.05% clipped (the path lives in the shade
+  the orbit captures looked down on). LESSONS/bugs (all fixed): (a) editor caches
+  ue_capture.rig -> path wrappers MUST clear sys.modules['ue_capture*'] before exec or
+  path_fan is shadowed; (b) `open(ip,'w').write(open(ip).read()...)` TRUNCATES before
+  the inner read -> emptied images.txt -> train "need at least one array to concatenate"
+  (read into a var first); (c) --from-capture must still run the averaging fold;
+  (d) capture_path HARD-CAP must be ~8h (510-1022 poses x avg is slow); (e) a path-fan
+  capture is >1000 imgs @1536 -> `--data_device cpu` (cuda OOMs an 80GB card mid-densify:
+  ~29GB images + the growing model); (f) buried-frame filter does NOT apply to path
+  captures (open-route frames frame the black NOSKY sky, ~0.4 black-frac, which is valid
+  bg not burial) -> prep_depth_dataset directly (no merge filter). Deploy: voxel-
+  downsample (4cm/top1) ~6M/71MB; opening camera looks down the route; the cinematic
+  VIDEO (render path frames -> ffmpeg, mild eq brighten) is the primary deliverable.
+  scene40 stays default; scene42 is the flythrough option.
 - **Pod-side depth GATE is MANDATORY before pod delete
   (`scripts/pod_gate_depth.py`):** renders 12 spread TRAINING views directly from
   the model (no viewer, no pose-conversion ambiguity) + invdepth MAE vs GT.
