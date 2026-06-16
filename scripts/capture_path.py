@@ -110,7 +110,9 @@ def main():
     print(f"""
 === POD: depth-primary flythrough train ===
 upload {tar} to /root; clone gsv + pip(numpy<2 after opencv) + pod_patch_alpha.py;
-python3 -u gsv/train.py -s /root/ed -m /root/ed/out -r 1 --data_device cuda --random_background -d depths \\
+NOTE: --data_device cpu (NOT cuda) -- a path-fan capture can be >1000 imgs @1536; on
+cuda the images (~29GB) + the densifying model OOM even an 80GB card mid-train.
+python3 -u gsv/train.py -s /root/ed -m /root/ed/out -r 1 --data_device cpu --random_background -d depths \\
   --depth_l1_weight_init 1.0 --depth_l1_weight_final 0.5 --iterations 40000 --densify_until_iter 26000 \\
   --densify_grad_threshold 0.00006 --percent_dense 0.003 --port 6021 --test_iterations -1 --save_iterations 15000 40000
 then pod_gate_depth.py; pull; clean; SOG; deploy with the viewer auto-flying {args.path}.""")
