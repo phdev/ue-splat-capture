@@ -678,6 +678,11 @@ compensated for them. Key findings (scenes 19-34):
   fully loaded, 738 ISMs) BEFORE any capture. "Streaming Disabled" badge / "No loaded
   region" → WP not streaming; force-load via `WorldPartitionBlueprintLibrary.get_actor_descs
   → load_actors + pin_actors` + move the viewport near the scene (it's the streaming source).
+  TOOL: `scripts/ue_force_load_wp.py` (via ue_exec) does this + reports before/after counts
+  AND hidden-instance counts — so you can tell PARTIAL-STREAMING ("objects not enabled" =
+  ~17 actors/26K inst → load+pin → 112 actors/738 ISMs/49,560 inst) from HIDDEN components.
+  Confirmed 2026-06-16: a close-range "objects not enabled" report was partial streaming,
+  NOT hidden — load+pin fixed it (0 hidden components found).
 - **Joint training of mixed passes FAILS.** Duplicate poses with conflicting content
   (foliage-on RGB + foliage-off RGB at the same camera) → optimizer averages → severe
   under-densification (scene22/23: 263-735K vs the 1.5M+ healthy runs) + PSNR=inf data leak
