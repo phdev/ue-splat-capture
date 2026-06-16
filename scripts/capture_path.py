@@ -99,7 +99,9 @@ def main():
     pngs = glob.glob(f"{ed}/images/*.png")
     for p in pngs:
         Image.open(p).convert("RGB").save(p[:-4] + ".jpg", "JPEG", quality=92); os.remove(p)
-    ip = f"{ed}/sparse/0/images.txt"; open(ip, "w").write(open(ip).read().replace(".png", ".jpg"))
+    ip = f"{ed}/sparse/0/images.txt"
+    _txt = open(ip).read()                      # READ first -- open(ip,"w") truncates before
+    open(ip, "w").write(_txt.replace(".png", ".jpg"))   # the inner read if done in one expr
     tar = f"/tmp/{args.prefix}.tar.gz"
     subprocess.run(f"cd {REPO}/out/{args.prefix}_train && COPYFILE_DISABLE=1 tar --no-xattrs -cf - ed | gzip -1 > {tar}",
                    shell=True, check=True)
