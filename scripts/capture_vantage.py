@@ -139,7 +139,10 @@ def main():
     subprocess.run(f"cd {REPO}/out/{args.prefix}_train && COPYFILE_DISABLE=1 tar --no-xattrs -cf - ed | gzip -1 > {tar}",
                    shell=True, check=True)
     print(f"[prep] {len(pngs)} frames; tar {tar} ({os.path.getsize(tar)/1e9:.2f} GB)")
-    print(f"=== POD: depth-primary train (--data_device cpu), then gate/pull/clean/SOG; viewer opens at the viewpoint ===")
+    print("=== POD: depth-primary train, STANDARD densify (grad 0.00013 / percent_dense 0.01 /")
+    print("    densify_until 20000 / 30000 iters) + --data_device cpu. A vantage is FOCUSED ->")
+    print("    large-tier densify (0.00006) explodes the gaussian count + OOMs an 80GB card by")
+    print("    ~iter 12K. Then gate/pull/voxel-clean/SOG; viewer OPENS at the viewpoint pose. ===")
 
 
 if __name__ == "__main__":
