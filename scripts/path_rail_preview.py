@@ -96,13 +96,6 @@ def main():
         samples.append(((loc.x, loc.y, gz + EYE), yaw))
 
     x0, y0, z0 = samples[0][0]
-    cam = eas.spawn_actor_from_class(unreal.CineCameraActor, unreal.Vector(x0, y0, z0),
-                                     unreal.Rotator(0.0, samples[0][1], 0.0))
-    cam.set_actor_label("PATH_PREVIEW_CAM")
-    try:
-        cam.set_editor_property("tags", [unreal.Name(TAG_CAM)])
-    except Exception:
-        pass
 
     # Fresh, uniquely-named sequence (create_asset auto-opens -> delete is unreliable).
     aes = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
@@ -125,7 +118,17 @@ def main():
     tr = seq.get_tick_resolution()
     tps = tr.numerator / tr.denominator
 
-    cb = seq.add_possessable(cam)
+    # SPAWNABLE camera: a possessable bound to a Python-spawned level actor does not
+    # reliably resolve/drive in PIE; a spawnable is owned by the sequence so it always binds.
+    tmpl = eas.spawn_actor_from_class(unreal.CineCameraActor, unreal.Vector(x0, y0, z0),
+                                      unreal.Rotator(0.0, samples[0][1], 0.0))
+    tmpl.set_actor_label("PATH_PREVIEW_CAM_TMPL")
+    try:
+        cb = seq.add_spawnable_from_instance(tmpl)
+    except Exception:
+        cb = unreal.MovieSceneSequenceExtensions.add_spawnable_from_instance(seq, tmpl)
+    eas.destroy_actor(tmpl)                            # spawnable keeps its own copy
+    print("SPAWNABLE_OK %s" % cb.get_display_name())
     tt = cb.add_track(unreal.MovieScene3DTransformTrack)
     ts = tt.add_section()
     ts.set_start_frame_seconds(0.0)
