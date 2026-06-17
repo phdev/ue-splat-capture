@@ -707,6 +707,26 @@ and the island RE-trained under the exact same recipe with zero regression
   rail only repositions attached actors in-editor; true PIE flythrough would need a Blueprint
   /timeline driving the camera, not pursued). To view: right-click PATH_PREVIEW_CAM ->
   Pilot, then drag the rail slider.
+- **AUTO-PLAY flythrough that WORKS in PIE (`scripts/path_rail_bp.py`).** Graph-free Blueprint:
+  a CineCameraActor subclass + an **InterpToMovementComponent** whose ControlPoints are the
+  ground-snapped eye-height path samples (relative to spawn; Duration 30s;
+  behaviour_type LOOP_RESET), placed instance PATH_FLY_CAM with
+  `auto_activate_for_player=AutoReceiveInput.PLAYER0`. On Play the InterpToMovement moves the
+  camera along the path (runtime-native — unlike the Sequencer transform track that never
+  drove anything) and auto_activate makes it the player view. CONFIRMED moving in PIE.
+  ROTATION GAP (unsolved by pure Python): InterpToMovement is position-ONLY
+  (dir shows only constrain_direction_to_plane/velocity, no rotation-follows-velocity), and
+  CineCameraComponent exposes NO look-at/aim property to Python (dir for look/track/aim =
+  empty; get_editor_property('lookat_tracking_settings'/'look_at_tracking_settings') both
+  fail). So the camera can't be made to face travel direction without ONE Event-Graph node,
+  which Python can't author (no K2 node authoring). FINISH MANUALLY: open BP_PathFly Event
+  Graph -> Event Tick -> Get Velocity -> Make Rot from X (X=velocity) -> Set Actor Rotation;
+  compile. SubobjectDataSubsystem flow that worked: get_engine_subsystem ->
+  k2_gather_subobject_data_for_blueprint(bp)[0] as parent -> AddNewSubobjectParams
+  (parent_handle/new_class/blueprint_context) -> add_new_subobject -> get template via
+  SubobjectDataBlueprintFunctionLibrary.get_object(k2_find_subobject_data_from_handle(h)).
+  create_asset(name, dir, None, BlueprintFactory(parent_class=...)); place via
+  load_blueprint_class + spawn_actor_from_class.
 - **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
   of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
   `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a
