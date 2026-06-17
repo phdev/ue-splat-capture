@@ -154,24 +154,10 @@ def main():
     except Exception as e:
         print("cp_check_err", str(e)[:50])
 
-    # RotatingMovementComponent: yaw at the loop's angular rate -> camera faces travel dir.
-    try:
-        roots2 = sds.k2_gather_subobject_data_for_blueprint(bp)
-        p2 = unreal.AddNewSubobjectParams()
-        p2.set_editor_property("parent_handle", roots2[0])
-        p2.set_editor_property("new_class", unreal.RotatingMovementComponent)
-        p2.set_editor_property("blueprint_context", bp)
-        h2, f2 = sds.add_new_subobject(p2)
-        rmc = unreal.SubobjectDataBlueprintFunctionLibrary.get_object(sds.k2_find_subobject_data_from_handle(h2))
-        rmc.set_editor_property("rotation_rate", unreal.Rotator(pitch=0.0, yaw=yaw_rate, roll=0.0))
-        # rotate about the camera's own origin (don't orbit a pivot)
-        try:
-            rmc.set_editor_property("pivot_translation", unreal.Vector(0, 0, 0))
-        except Exception:
-            pass
-        print("ROT_COMP %s rate=%.2f" % (type(rmc).__name__, yaw_rate))
-    except Exception as e:
-        print("rotcomp_err", str(e)[:60])
+    # NOTE: a second UMovementComponent (RotatingMovement) to yaw-track the path conflicts
+    # with InterpToMovement (they fight over the root transform), so rotation is left to a
+    # one-node Event-Graph addition (Tick -> InterpMove.Velocity -> MakeRotFromX ->
+    # SetActorRotation) which Python can't author. The instance starts facing segment 0.
 
     unreal.BlueprintEditorLibrary.compile_blueprint(bp)
     unreal.EditorAssetLibrary.save_asset(BP_FULL)

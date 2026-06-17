@@ -720,14 +720,16 @@ and the island RE-trained under the exact same recipe with zero regression
   empty; get_editor_property('lookat_tracking_settings'/'look_at_tracking_settings') both
   fail). LookAt/velocity facing needs a graph node Python can't author (an Event Tick -> Get
   Velocity -> Make Rot from X -> Set Actor Rotation works by hand, but actor GetVelocity can
-  read 0 under InterpToMovement). SOLVED graph-free for the CIRCULAR loop with a SECOND runtime
-  component: a **RotatingMovementComponent**, rotation_rate yaw = (signed total heading change
-  over the loop)/Duration (=360/30=12 deg/s for the seed circle), plus the instance's initial
-  yaw = heading of segment 0 (~94). InterpToMovement does position, RotatingMovement yaws at the
-  loop's angular rate -> camera tracks the tangent (faces travel). EXACT only for a
-  constant-angular-velocity (circular) path; a reshaped non-circular loop drifts (constant rate
-  is the average) -> re-run or use the manual pilot. SubobjectDataSubsystem flow that worked
-  (BOTH components): get_engine_subsystem ->
+  read 0 under InterpToMovement). A SECOND UMovementComponent (RotatingMovementComponent) to
+  yaw-track the loop DID NOT WORK -- two movement components on one root fight over the
+  transform (InterpToMovement wins; camera keeps fixed yaw). The rail's own "Lock Orientation
+  to Rail" also misfires: the attached pilot camera tracks the spline but locks 90deg OFF the
+  tangent (faces radially outward; verified yaw 0->88 over a quarter while the tangent went
+  90->180). NET: NO pure-Python way to face travel direction here -- it needs the one Event-Graph
+  node by hand (Tick -> drag InterpMove component in -> Get Velocity -> Make Rot from X ->
+  Set Actor Rotation; use the COMPONENT's Velocity, not the actor's Get Velocity which reads 0).
+  BP left movement-only, instance starts at segment 0's heading. SubobjectDataSubsystem flow
+  that worked: get_engine_subsystem ->
   k2_gather_subobject_data_for_blueprint(bp)[0] as parent -> AddNewSubobjectParams
   (parent_handle/new_class/blueprint_context) -> add_new_subobject -> get template via
   SubobjectDataBlueprintFunctionLibrary.get_object(k2_find_subobject_data_from_handle(h)).
