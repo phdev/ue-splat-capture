@@ -677,19 +677,25 @@ and the island RE-trained under the exact same recipe with zero regression
   `AutomationLibrary.take_high_res_screenshot` never renders/writes a file. For reliable
   scripting/capture, keep the UnrealEditor window in the FOREGROUND.
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
-  hit Play" — attaches a CineCameraActor to CAPTURE_PATH_RAIL (rides the spline; +Z eye
-  offset; `lock_orientation_to_rail=True` so it faces forward), builds a LevelSequence
-  animating `CurrentPositionOnRail` 0->1 with a CameraCut bound to that camera, and an
-  auto-play + infinite-loop LevelSequenceActor. Because the camera FOLLOWS the rail, the
-  preview auto-reflects spline edits — reshape the loop, hit Play again, no re-run. UE 5.7
-  Sequencer Python gotchas: `set_actor_relative_location` REQUIRES (loc, sweep, teleport);
-  `unreal.SequenceTimeUnit` is ABSENT -> add float keys with FrameNumber in TICK resolution
-  (`seq.get_tick_resolution()` -> ticks/sec; `ch.add_key(FrameNumber(int(t*tps)), v)`);
-  `AssetTools.create_asset` AUTO-OPENS the asset in a Sequencer tab so a later
-  `delete_asset` silently fails and the next `create_asset` returns None -> always create a
-  FRESH uniquely-named sequence (PathPreview, _1, _2…) instead of delete+recreate. Verified
-  ATTACH_MOVE≈loop-diameter (rail drives the attached camera). Optional /tmp/preview_cfg.json
-  {dur,eye}.
+  hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
+  `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only
+  repositions attached actors in-EDITOR (via property-change callbacks), so on Play the
+  camera sits still (confirmed: "camera doesn't move"). FIX = BAKE the flythrough: sample the
+  spline by arc length, ground-snap each, and key a CineCameraActor's WORLD transform
+  (position at eye height; yaw = `atan2(dir.y,dir.x)`, UNWRAPPED so it doesn't spin 358° at
+  ±180; pitch/roll 0) into a `MovieScene3DTransformTrack`, with a CameraCut bound to it +
+  auto-play/looping LevelSequenceActor. Baking has no runtime rail dependency, so it works in
+  PIE. Re-run after reshaping the loop to re-bake. UE 5.7 Sequencer gotchas:
+  `set_actor_relative_location` REQUIRES (loc, sweep, teleport); `unreal.SequenceTimeUnit` is
+  ABSENT -> key with FrameNumber in TICK resolution (`seq.get_tick_resolution()` num/den =
+  ticks/sec); transform section `get_all_channels()` returns 9 in order
+  [locX,Y,Z, rotRoll,Pitch,Yaw, sclX,Y,Z] — KEY SCALE=1 (unkeyed scale can default to 0 =
+  invisible); `create_asset` AUTO-OPENS the asset so later `delete_asset` fails and the next
+  `create_asset` returns None -> always create a FRESH uniquely-named sequence
+  (PathPreview, _1, _2…). Verify the bake by reading channel keys back
+  (`section.get_all_channels()[i].get_keys()[k].get_value()`) — an in-editor sequencer SCRUB
+  does NOT push the possessable transform to the level actor for readback (looks frozen even
+  when the keys are correct). Optional /tmp/preview_cfg.json {dur,eye}.
 - **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
   of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
   `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a

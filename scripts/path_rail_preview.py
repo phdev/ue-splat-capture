@@ -2,17 +2,18 @@
 CAPTURE_PATH_RAIL when you Play, so you can check the route before capturing.
 
 Run INSIDE the warm editor (keep the UE window FOREGROUND):
-    python3 scripts/ue_exec.py scripts/path_rail_preview.py 120
+    python3 scripts/ue_exec.py scripts/path_rail_preview.py 150
 
-Builds: a CineCameraActor attached to the rail (rides the spline), a LevelSequence
-(/Game/CapturePath/PathPreview) that animates the rail's CurrentPositionOnRail 0->1
-over DUR seconds with a Camera Cut bound to that camera, and an auto-play
-LevelSequenceActor -> hitting Play flies the camera around the loop. Because the
-camera FOLLOWS the rail, it always reflects your latest spline edits (no re-bake).
-Idempotent: re-running rebuilds the camera + sequence. Optional /tmp/preview_cfg.json
-{"dur":30,"eye":480}.
+Approach: BAKE the flythrough into the sequence. We sample the rail spline by arc
+length, snap each sample to the terrain, and key a CineCamera's world transform
+(position at eye height, yaw facing forward along travel) over DUR seconds, with a
+Camera Cut bound to it and an auto-play + looping LevelSequenceActor. Baking (vs
+attaching the camera to the rail + animating CurrentPositionOnRail) is what actually
+moves the camera in PIE -- the rail only repositions attached actors in-editor.
+Re-run after you reshape the loop to re-bake. Optional /tmp/preview_cfg.json {dur,eye}.
 """
 import json
+import math
 import os
 import unreal
 
@@ -21,7 +22,6 @@ TAG_CAM = "PATH_PREVIEW_CAM"
 TAG_SEQACT = "PATH_PREVIEW_SEQ"
 SEQ_DIR = "/Game/CapturePath"
 SEQ_NAME = "PathPreview"
-SEQ_FULL = SEQ_DIR + "/" + SEQ_NAME
 
 
 def find_by_tag(eas, tag):
@@ -32,6 +32,23 @@ def find_by_tag(eas, tag):
         except Exception:
             pass
     return None
+
+
+def ground_z(world, x, y, z_hint):
+    start = unreal.Vector(x, y, z_hint + 20000.0)
+    end = unreal.Vector(x, y, z_hint - 200000.0)
+    try:
+        hit = unreal.SystemLibrary.line_trace_single(
+            world, start, end, unreal.TraceTypeQuery.TRACE_TYPE_QUERY1, False, [],
+            unreal.DrawDebugTrace.NONE, True)
+        hr = hit[1] if isinstance(hit, (tuple, list)) else hit
+        if hr:
+            t = hr.to_tuple()
+            if t[0]:
+                return float(t[5].z)
+    except Exception:
+        pass
+    return z_hint
 
 
 def main():
@@ -46,50 +63,50 @@ def main():
     FPS = 30
 
     eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+    world = ues.get_editor_world()
     rail = find_by_tag(eas, TAG_RAIL)
     if not rail:
         print("NO_RAIL")
         return
 
-    # Clean prior preview actors.
     for t in (TAG_CAM, TAG_SEQACT):
         a = find_by_tag(eas, t)
         while a:
             eas.destroy_actor(a)
             a = find_by_tag(eas, t)
 
-    rail.set_editor_property("lock_orientation_to_rail", True)
     sp = rail.get_components_by_class(unreal.SplineComponent)[0]
-    start = sp.get_location_at_distance_along_spline(0.0, unreal.SplineCoordinateSpace.WORLD)
+    L = sp.get_spline_length()
+    N = max(48, min(160, int(L / 100.0)))             # ~1 key/m
+    WS = unreal.SplineCoordinateSpace.WORLD
+    samples, prev_yaw = [], None
+    for i in range(N + 1):
+        d = L * i / N                                  # 0..L (closed loop -> last≈first)
+        loc = sp.get_location_at_distance_along_spline(d, WS)
+        dirc = sp.get_direction_at_distance_along_spline(d, WS)
+        gz = ground_z(world, loc.x, loc.y, loc.z)
+        yaw = math.degrees(math.atan2(dirc.y, dirc.x))
+        if prev_yaw is not None:                        # unwrap so it doesn't spin at ±180
+            while yaw - prev_yaw > 180.0:
+                yaw -= 360.0
+            while yaw - prev_yaw < -180.0:
+                yaw += 360.0
+        prev_yaw = yaw
+        samples.append(((loc.x, loc.y, gz + EYE), yaw))
 
-    cam = eas.spawn_actor_from_class(unreal.CineCameraActor,
-                                     unreal.Vector(start.x, start.y, start.z + EYE),
-                                     unreal.Rotator(0, 0, 0))
+    x0, y0, z0 = samples[0][0]
+    cam = eas.spawn_actor_from_class(unreal.CineCameraActor, unreal.Vector(x0, y0, z0),
+                                     unreal.Rotator(0.0, samples[0][1], 0.0))
     cam.set_actor_label("PATH_PREVIEW_CAM")
     try:
         cam.set_editor_property("tags", [unreal.Name(TAG_CAM)])
     except Exception:
         pass
-    cam.attach_to_actor(rail, "", unreal.AttachmentRule.KEEP_WORLD,
-                        unreal.AttachmentRule.KEEP_WORLD, unreal.AttachmentRule.KEEP_WORLD, False)
-    cam.set_actor_relative_location(unreal.Vector(0, 0, EYE), False, False)
 
-    # Validate the rail moves the attached camera: nudge position, see if it travels.
-    rail.set_editor_property("current_position_on_rail", 0.0)
-    p0 = cam.get_actor_location()
-    rail.set_editor_property("current_position_on_rail", 0.5)
-    p1 = cam.get_actor_location()
-    rail.set_editor_property("current_position_on_rail", 0.0)
-    moved = ((p0.x - p1.x) ** 2 + (p0.y - p1.y) ** 2 + (p0.z - p1.z) ** 2) ** 0.5
-    print("ATTACH_MOVE=%.0fcm (rail drives camera)" % moved)
-
-    # Build the level sequence.
-    # Always create a FRESH, uniquely-named sequence: create_asset returns None on a
-    # name collision, and deleting an asset that's open in a Sequencer tab is unreliable.
-    # Best-effort clean the old one; if it won't delete, just use the next free name.
+    # Fresh, uniquely-named sequence (create_asset auto-opens -> delete is unreliable).
     aes = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
-    name = SEQ_NAME
-    i = 0
+    name, i = SEQ_NAME, 0
     while unreal.EditorAssetLibrary.does_asset_exist(SEQ_DIR + "/" + name):
         try:
             aes.close_all_editors_for_asset(unreal.EditorAssetLibrary.load_asset(SEQ_DIR + "/" + name))
@@ -105,24 +122,28 @@ def main():
     seq.set_display_rate(unreal.FrameRate(FPS, 1))
     seq.set_playback_start_seconds(0.0)
     seq.set_playback_end_seconds(DUR)
-    endf = int(FPS * DUR)
-
-    # Rail CurrentPositionOnRail 0 -> 1.
-    rb = seq.add_possessable(rail)
-    ft = rb.add_track(unreal.MovieSceneFloatTrack)
-    ft.set_property_name_and_path("CurrentPositionOnRail", "CurrentPositionOnRail")
-    fs = ft.add_section()
-    fs.set_start_frame_seconds(0.0)
-    fs.set_end_frame_seconds(DUR)
     tr = seq.get_tick_resolution()
-    tps = tr.numerator / tr.denominator           # ticks per second
-    ch = fs.get_all_channels()[0]
-    ch.add_key(unreal.FrameNumber(0), 0.0)
-    ch.add_key(unreal.FrameNumber(int(round(DUR * tps))), 1.0)
-    print("RAIL_TRACK_OK")
+    tps = tr.numerator / tr.denominator
 
-    # Camera + camera cut bound to it.
     cb = seq.add_possessable(cam)
+    tt = cb.add_track(unreal.MovieScene3DTransformTrack)
+    ts = tt.add_section()
+    ts.set_start_frame_seconds(0.0)
+    ts.set_end_frame_seconds(DUR)
+    ch = ts.get_all_channels()                          # [locX,Y,Z, rotRoll,Pitch,Yaw, sclX,Y,Z]
+    print("CHANNELS=%d" % len(ch))
+    for k, (loc, yaw) in enumerate(samples):
+        f = unreal.FrameNumber(int(round(DUR * k / (len(samples) - 1) * tps)))
+        ch[0].add_key(f, loc[0])
+        ch[1].add_key(f, loc[1])
+        ch[2].add_key(f, loc[2])
+        ch[3].add_key(f, 0.0)
+        ch[4].add_key(f, 0.0)
+        ch[5].add_key(f, yaw)
+    for s in (6, 7, 8):                                  # keep scale = 1 (unkeyed can default to 0)
+        ch[s].add_key(unreal.FrameNumber(0), 1.0)
+    print("BAKE_OK keys=%d" % len(samples))
+
     try:
         cut = seq.add_track(unreal.MovieSceneCameraCutTrack)
     except Exception:
@@ -135,11 +156,8 @@ def main():
     except Exception:
         bid = cb.get_binding_id()
     cs.set_camera_binding_id(bid)
-    print("CUT_OK")
-
     unreal.EditorAssetLibrary.save_asset(seq_full)
 
-    # Auto-play actor.
     lsa = eas.spawn_actor_from_class(unreal.LevelSequenceActor, unreal.Vector(0, 0, 0), unreal.Rotator(0, 0, 0))
     lsa.set_actor_label("PATH_PREVIEW_SEQ")
     try:
@@ -152,18 +170,18 @@ def main():
         lsa.set_editor_property("level_sequence", unreal.SoftObjectPath(seq_full))
     ps = lsa.get_editor_property("playback_settings")
     ps.set_editor_property("auto_play", True)
-    try:                                              # loop forever for inspection
+    try:
         lc = ps.get_editor_property("loop_count")
         try:
-            lc.set_editor_property("value", -1)       # struct form
+            lc.set_editor_property("value", -1)
             ps.set_editor_property("loop_count", lc)
         except Exception:
-            ps.set_editor_property("loop_count", -1)   # plain-int form
+            ps.set_editor_property("loop_count", -1)
     except Exception:
         pass
     lsa.set_editor_property("playback_settings", ps)
 
-    print("PREVIEW_DONE seq=%s dur=%.0fs eye=%.0f autoplay=1" % (seq_full, DUR, EYE))
+    print("PREVIEW_DONE seq=%s dur=%.0fs eye=%.0f keys=%d autoplay=1" % (seq_full, DUR, EYE, len(samples)))
 
 
 try:
