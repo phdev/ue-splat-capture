@@ -11,6 +11,7 @@ InterpToMovementComponent moves it along the path -- no event-graph nodes (which
 can't author). Idempotent. Optional /tmp/preview_cfg.json {dur,eye}.
 """
 import json
+import math
 import os
 import unreal
 
@@ -68,6 +69,24 @@ def main():
         world_pts.append(unreal.Vector(loc.x, loc.y, gz(world, loc.x, loc.y, loc.z) + EYE))
     origin = world_pts[0]
     print("PTS %d origin=(%.0f,%.0f,%.0f)" % (len(world_pts), origin.x, origin.y, origin.z))
+
+    # Heading per segment -> initial yaw + the loop's average yaw rate (deg/s). For the
+    # circular loop traversed at constant speed this exactly tracks the travel direction.
+    hs = []
+    for i in range(len(world_pts)):
+        b, a = world_pts[i], world_pts[(i + 1) % len(world_pts)]
+        hs.append(math.degrees(math.atan2(a.y - b.y, a.x - b.x)))
+    total = 0.0
+    for i in range(1, len(hs) + 1):
+        d = hs[i % len(hs)] - hs[i - 1]
+        while d > 180.0:
+            d -= 360.0
+        while d < -180.0:
+            d += 360.0
+        total += d
+    yaw_rate = total / DUR
+    init_yaw = hs[0]
+    print("HEADING init=%.0f total=%.0f rate=%.2f" % (init_yaw, total, yaw_rate))
 
     # Fresh BP.
     aes = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
@@ -135,6 +154,25 @@ def main():
     except Exception as e:
         print("cp_check_err", str(e)[:50])
 
+    # RotatingMovementComponent: yaw at the loop's angular rate -> camera faces travel dir.
+    try:
+        roots2 = sds.k2_gather_subobject_data_for_blueprint(bp)
+        p2 = unreal.AddNewSubobjectParams()
+        p2.set_editor_property("parent_handle", roots2[0])
+        p2.set_editor_property("new_class", unreal.RotatingMovementComponent)
+        p2.set_editor_property("blueprint_context", bp)
+        h2, f2 = sds.add_new_subobject(p2)
+        rmc = unreal.SubobjectDataBlueprintFunctionLibrary.get_object(sds.k2_find_subobject_data_from_handle(h2))
+        rmc.set_editor_property("rotation_rate", unreal.Rotator(pitch=0.0, yaw=yaw_rate, roll=0.0))
+        # rotate about the camera's own origin (don't orbit a pivot)
+        try:
+            rmc.set_editor_property("pivot_translation", unreal.Vector(0, 0, 0))
+        except Exception:
+            pass
+        print("ROT_COMP %s rate=%.2f" % (type(rmc).__name__, yaw_rate))
+    except Exception as e:
+        print("rotcomp_err", str(e)[:60])
+
     unreal.BlueprintEditorLibrary.compile_blueprint(bp)
     unreal.EditorAssetLibrary.save_asset(BP_FULL)
     print("BP_SAVED")
@@ -157,46 +195,13 @@ def main():
         inst.set_editor_property("auto_activate_for_player", unreal.AutoReceiveInput.PLAYER0)
     except Exception as e:
         print("autoact_err", str(e)[:50])
-    print("INSTANCE_PLACED label=%s" % inst.get_actor_label())
-
-    # Spire-facing: CineCamera Look-at Tracking aimed at a target at the loop center
-    # (InterpToMovement only translates). Fallback to a fixed spire-facing yaw.
-    cz = gz(world, 89712.0, -5226.0, 2000.0)
-    spire = unreal.Vector(89712.0, -5226.0, cz + 900.0)
-    for a in list(eas.get_all_level_actors()):
-        try:
-            if a.actor_has_tag("PATH_FLY_TARGET"):
-                eas.destroy_actor(a)
-        except Exception:
-            pass
-    tgt = eas.spawn_actor_from_class(unreal.TargetPoint, spire, unreal.Rotator(0, 0, 0))
-    tgt.set_actor_label("PATH_FLY_TARGET")
+    # Start facing the initial travel direction; RotatingMovementComponent keeps it tracking.
     try:
-        tgt.set_editor_property("tags", [unreal.Name("PATH_FLY_TARGET")])
-    except Exception:
-        pass
-    laset = False
-    try:
-        cc = inst.get_cine_camera_component()
-        for pn in ("look_at_tracking_settings", "lookat_tracking_settings"):
-            try:
-                lat = cc.get_editor_property(pn)
-                lat.set_editor_property("enable_look_at_tracking", True)
-                lat.set_editor_property("actor_to_track", tgt)
-                cc.set_editor_property(pn, lat)
-                laset = True
-                print("LOOKAT set via %s" % pn)
-                break
-            except Exception as e:
-                print("lookat_try %s %s" % (pn, str(e)[:40]))
+        inst.set_actor_rotation(unreal.Rotator(pitch=0.0, yaw=init_yaw, roll=0.0), False)
+        print("INIT_YAW set %.0f" % init_yaw)
     except Exception as e:
-        print("lookat_err", str(e)[:50])
-    if not laset:
-        try:
-            inst.set_actor_rotation(unreal.Rotator(yaw=180.0), False)
-            print("LOOKAT fallback fixed yaw=180")
-        except Exception as e:
-            print("rot_err", str(e)[:40])
+        print("rot_err", str(e)[:40])
+    print("INSTANCE_PLACED label=%s" % inst.get_actor_label())
     print("BP_DONE %s dur=%.0fs pts=%d" % (BP_FULL, DUR, len(world_pts)))
 
 

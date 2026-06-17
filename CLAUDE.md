@@ -718,10 +718,16 @@ and the island RE-trained under the exact same recipe with zero regression
   (dir shows only constrain_direction_to_plane/velocity, no rotation-follows-velocity), and
   CineCameraComponent exposes NO look-at/aim property to Python (dir for look/track/aim =
   empty; get_editor_property('lookat_tracking_settings'/'look_at_tracking_settings') both
-  fail). So the camera can't be made to face travel direction without ONE Event-Graph node,
-  which Python can't author (no K2 node authoring). FINISH MANUALLY: open BP_PathFly Event
-  Graph -> Event Tick -> Get Velocity -> Make Rot from X (X=velocity) -> Set Actor Rotation;
-  compile. SubobjectDataSubsystem flow that worked: get_engine_subsystem ->
+  fail). LookAt/velocity facing needs a graph node Python can't author (an Event Tick -> Get
+  Velocity -> Make Rot from X -> Set Actor Rotation works by hand, but actor GetVelocity can
+  read 0 under InterpToMovement). SOLVED graph-free for the CIRCULAR loop with a SECOND runtime
+  component: a **RotatingMovementComponent**, rotation_rate yaw = (signed total heading change
+  over the loop)/Duration (=360/30=12 deg/s for the seed circle), plus the instance's initial
+  yaw = heading of segment 0 (~94). InterpToMovement does position, RotatingMovement yaws at the
+  loop's angular rate -> camera tracks the tangent (faces travel). EXACT only for a
+  constant-angular-velocity (circular) path; a reshaped non-circular loop drifts (constant rate
+  is the average) -> re-run or use the manual pilot. SubobjectDataSubsystem flow that worked
+  (BOTH components): get_engine_subsystem ->
   k2_gather_subobject_data_for_blueprint(bp)[0] as parent -> AddNewSubobjectParams
   (parent_handle/new_class/blueprint_context) -> add_new_subobject -> get template via
   SubobjectDataBlueprintFunctionLibrary.get_object(k2_find_subobject_data_from_handle(h)).
