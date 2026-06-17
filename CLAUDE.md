@@ -660,6 +660,22 @@ and the island RE-trained under the exact same recipe with zero regression
   at read time (fine `SAMPLE_CM` << capture `step_cm`). (d) `Actor.add_component_by_class`
   isn't bound in 5.7 — spawn the real rail class instead of bolting a SplineComponent on a
   bare Actor. Actor tag "CAPTURE_PATH" + label "CAPTURE_PATH_RAIL" make it findable on re-read.
+- **CLOSED loop around a feature (`scripts/path_rail_loop.py`).** Lays a ground-snapped ring
+  + `set_closed_loop(True)` around a center, for an encircling flythrough. SPIRE/feature
+  CENTERING: a trace-grid "tallest surface" peak is UNRELIABLE — the Electric Dreams hero
+  rock (and many Nanite meshes) has NO collision on the Visibility channel, so down-traces
+  pass THROUGH it to the terrain (peak came back only ~4m above ground). Prefer the splat
+  CONTENT MEDIAN mapped to world (`world = ply_median*100` with the y-flip; island median
+  ply (897,52,26) -> world (89712,-5226,2578)) as the center; the ring points still ground-
+  snap fine (terrain HAS collision). Override via /tmp/loop_cfg.json {center_cm,radius_cm,n}.
+- **EDITOR-WEDGE + App-Nap gotchas (cost ~10 min).** (1) NEVER iterate
+  `get_all_level_actors()` + `get_actor_bounds()` over this scene from a remote-exec call —
+  it blocks the game thread for MINUTES and makes the editor look dead (kill the client; the
+  editor keeps grinding what it already received). Keep editor probes O(few traces). (2) A
+  BACKGROUNDED editor gets macOS App-Nap throttled: Python remote-exec multicast discovery
+  goes flaky ("no UE node found (last err: None)" — RETRY 4-6x, it recovers) and
+  `AutomationLibrary.take_high_res_screenshot` never renders/writes a file. For reliable
+  scripting/capture, keep the UnrealEditor window in the FOREGROUND.
 - **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
   of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
   `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a
