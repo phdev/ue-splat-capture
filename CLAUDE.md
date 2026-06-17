@@ -696,6 +696,17 @@ and the island RE-trained under the exact same recipe with zero regression
   (`section.get_all_channels()[i].get_keys()[k].get_value()`) — an in-editor sequencer SCRUB
   does NOT push the possessable transform to the level actor for readback (looks frozen even
   when the keys are correct). Optional /tmp/preview_cfg.json {dur,eye}.
+- **...BUT the LevelSequence flythrough NEVER actually drove the camera in this project**
+  (possessable OR spawnable): the bake reads back perfect (section active, Absolute blend,
+  9 double channels, 116 keys spanning the ring over 0..30s, playback range covers them) yet
+  the spawned/possessed camera stayed at the start in BOTH PIE and Sequencer scrub. Hours
+  lost. RELIABLE PREVIEW INSTEAD = `scripts/path_rail_pilot.py`: attach a CineCameraActor to
+  the rail (KEEP_WORLD + relative +Z eye + `lock_orientation_to_rail`) and the user scrubs the
+  rail's **"Current Position on Rail" (0..1)** slider in Details — proven (camera travels
+  ~3415cm as the slider goes 0->0.5). It's a manual in-editor scrub, NOT PIE auto-play (the
+  rail only repositions attached actors in-editor; true PIE flythrough would need a Blueprint
+  /timeline driving the camera, not pursued). To view: right-click PATH_PREVIEW_CAM ->
+  Pilot, then drag the rail slider.
 - **VANTAGE 'window' capture (PlayerStart, scene43 attempt — NOT deployed, the limit
   of single-viewpoint capture).** `UE_POSES_FILE` mode (explicit pose list) +
   `scripts/capture_vantage.py` build a converging SLAB (NxM cameras perpendicular to a
