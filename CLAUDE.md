@@ -686,13 +686,24 @@ and the island RE-trained under the exact same recipe with zero regression
   on the POST response AND the GET SSE channel is 405 — Python urllib `read()` returns 0 bytes
   (premature EOF); MUST use `curl -N` to read the held-open stream. `scripts/mcp_call.py`
   (curl-based) wraps it: `list` / `describe <Toolset>` / `meta <tool> '<json>'`. CAPABILITY
-  FINDING (5.8, Electric Dreams): `list_toolsets` returns ONLY `ToolsetRegistry.AgentSkillToolset`
-  (ListSkills/GetSkills/CreateSkill/UpdateSkill — manages UE "AgentSkills", NOT the scene). The
-  doc's SceneTools/ActorTools/MaterialInstanceTools/ObjectTools did NOT register here, so the
-  MCP currently CANNOT inspect/edit the scene, author Blueprint graph nodes, or set CineCamera
-  look-at — it is NOT yet a replacement for Python remote-exec. To recover the scene toolsets:
-  console `ModelContextProtocol.RefreshTools` + check Output Log for `toolset_registry` Python
-  import errors (the core Python toolsets likely failed to load or need a plugin enabled).
+  FINDING (5.8): by default `list_toolsets` returns ONLY `ToolsetRegistry.AgentSkillToolset`
+  (skill mgmt, NOT the scene), and `ModelContextProtocol.RefreshTools` does NOT add more
+  (confirmed: still "1 toolset"). The scene/blueprint/object/material toolsets live in a SEPARATE
+  plugin, **EditorToolset** (`Engine/Plugins/Experimental/Toolsets/EditorToolset`, Experimental,
+  disabled by default) — NOT the always-on ToolsetRegistry. FIX: Edit>Plugins enable
+  **EditorToolset** + restart -> registers `scene` (find_actors, trace_world,
+  add_to_scene_from_class/asset, remove/save), `object` (list/get/set/reset_properties — generic
+  UObject property get/set, reaches transforms + likely CineCamera lookat), plus material/
+  static_mesh/texture/data_table/blueprint/etc. BIG REVERSAL on graph authoring: UE 5.8 added
+  Python graph APIs (`unreal.EdGraph`/`EdGraphNode`/`BlueprintGraphPin`/`K2Node_*`) and
+  EditorToolset's **blueprint** toolset exposes the FULL surface — `create_node`, `connect_pins`,
+  `break_pins`, `set_pin_value`, `add_node_pin`, `add_event`, `add_function_graph`,
+  `compile_blueprint`, `find_node_types`, PLUS a graph DSL (`get_graph_dsl_docs`/`write_graph_dsl`
+  /`read_graph_dsl` to author a whole graph from code). So in 5.8 the MCP CAN author Blueprint
+  graphs (the 5.7 "Python can't author K2 nodes" wall is lifted) — e.g. the forward-facing camera
+  Tick->Velocity->MakeRot->SetActorRotation could be written via `write_graph_dsl`. With
+  EditorToolset enabled the MCP becomes a full, reliable replacement for Python remote-exec; drive
+  it now via `scripts/mcp_call.py` (no harness restart), restart Claude Code for native tools.
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
   hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
   `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only
