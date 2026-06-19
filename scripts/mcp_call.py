@@ -75,6 +75,9 @@ def main():
         r = tool_call("list_toolsets", {}, sid)
     elif a[0] == "describe":
         r = tool_call("describe_toolset", {"toolset_name": a[1]}, sid)
+    elif a[0] == "call":   # call <toolset_name> <tool_name> '<json-args>'
+        r = tool_call("call_tool", {"toolset_name": a[1], "tool_name": a[2],
+                                    "arguments": json.loads(a[3]) if len(a) > 3 else {}}, sid)
     elif a[0] == "meta":
         r = tool_call(a[1], json.loads(a[2]) if len(a) > 2 else {}, sid)
     elif a[0] == "raw":
@@ -83,7 +86,7 @@ def main():
     else:
         print("unknown cmd; see --help")
         return
-    print(json.dumps(r, indent=2)[:8000])
+    print(json.dumps(r, indent=2))
 
 
 main()
