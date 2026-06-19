@@ -17,3 +17,4 @@ out/
 results/*.json
 !results/baseline.json
 .gstack/
+.mcp.json
