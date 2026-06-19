@@ -704,6 +704,31 @@ and the island RE-trained under the exact same recipe with zero regression
   Tick->Velocity->MakeRot->SetActorRotation could be written via `write_graph_dsl`. With
   EditorToolset enabled the MCP becomes a full, reliable replacement for Python remote-exec; drive
   it now via `scripts/mcp_call.py` (no harness restart), restart Claude Code for native tools.
+- **MCP IS NOW THE ONLY WORKING CHANNEL — remote-exec is fully dead (2026-06-19).** After the
+  5.8 restart, `ue_exec.py` returns "no UE node found" on EVERY try even with a 50s timeout AND
+  even foregrounded (UDP multicast discovery just never gets a PONG; the earlier "retry 4-6x, it
+  recovers" no longer applies). MCP/HTTP keeps working regardless (separate listener, App-Nap
+  immune). So: STOP reaching for `ue_exec.py`/`path_rail_*.py`; do everything through MCP.
+  `call_tool` wants the SHORT `tool_name` (last dotted segment) with `toolset_name` separate
+  (`scripts/mcp_call.py call <toolset> <short_tool> '<json>'`); inside `execute_tool()` you use the
+  FULL dotted name.
+- **SET A SPLINE / REBUILD THE RAIL VIA MCP (no remote-exec needed).** `set_spline_points` is not
+  an MCP tool and the sandbox has no `unreal`, BUT `ObjectTools.set_properties` on the
+  `RailSplineComponent` writes `SplineCurves` directly and FIRES `PostEditChangeProperty` ->
+  `USplineComponent::UpdateSpline()` AND propagates to `CameraRig_Rail` so the preview-track meshes
+  rebuild too (VERIFIED: after writing a 20-pt r=3000cm circle, the rail's `get_actor_bounds`
+  became exactly 6000x6000cm centered on the new center). JSON shape (LOWERCASE keys, read one back
+  first with `get_properties ["SplineCurves"]` to copy the exact format):
+  `{"SplineCurves":{"position":{"points":[{"inVal":i,"outVal":{x,y,z},"arriveTangent":{x,y,z},
+  "leaveTangent":{x,y,z},"interpMode":"CIM_CurveAuto"}, ...]}}}` — partial-struct set (position
+  only) preserves rotation/scale/closed-loop. Use tangents=(P[i+1]-P[i-1])/2 for a smooth closed
+  circle. The whole rebuild (compute circle -> `trace_world` ground-snap each pt -> set_properties)
+  runs as ONE `ProgrammaticToolset.execute_tool_script` (`scripts/mcp_rail_circle.tool.py`, run via
+  `scripts/mcp_run_tool.py`). Sandbox modules = {copy,time,math,datetime,re,json} + `execute_tool(
+  full_name, json_str)`; script MUST define `run()->dict`. CAPTURE/VERIFY with
+  `scripts/mcp_capture.py out.png x y z pitch yaw [gridSpacing gridHeight]` — `CaptureViewport`
+  REQUIRES the `annotations` block every call (no default; pass gridSpacing 0 to disable), returns
+  a base64 PNG (~3-4MB so use curl timeout ~120s). `mcp_call.py` is import-safe (guarded `main()`).
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
   hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
   `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only
