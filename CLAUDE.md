@@ -676,6 +676,23 @@ and the island RE-trained under the exact same recipe with zero regression
   goes flaky ("no UE node found (last err: None)" — RETRY 4-6x, it recovers) and
   `AutomationLibrary.take_high_res_screenshot` never renders/writes a file. For reliable
   scripting/capture, keep the UnrealEditor window in the FOREGROUND.
+- **UNREAL MCP plugin (UE 5.8, Experimental — `ModelContextProtocol`).** Editor-embedded MCP
+  server over local HTTP `127.0.0.1:8000/mcp`. Enable: Edit>Plugins "Unreal MCP" + restart;
+  start: Editor Prefs > Model Context Protocol > Auto Start Server (defaults OFF) OR console
+  `ModelContextProtocol.StartServer`; client config: `ModelContextProtocol.GenerateClientConfig
+  ClaudeCode` writes `.mcp.json` to the PROJECT root (we put one in this repo root instead,
+  gitignored, since we run Claude Code from here). TRANSPORT GOTCHA (cost real time): protocol
+  methods (initialize/tools/list) return inline JSON, but tool CALLS stream the result as SSE
+  on the POST response AND the GET SSE channel is 405 — Python urllib `read()` returns 0 bytes
+  (premature EOF); MUST use `curl -N` to read the held-open stream. `scripts/mcp_call.py`
+  (curl-based) wraps it: `list` / `describe <Toolset>` / `meta <tool> '<json>'`. CAPABILITY
+  FINDING (5.8, Electric Dreams): `list_toolsets` returns ONLY `ToolsetRegistry.AgentSkillToolset`
+  (ListSkills/GetSkills/CreateSkill/UpdateSkill — manages UE "AgentSkills", NOT the scene). The
+  doc's SceneTools/ActorTools/MaterialInstanceTools/ObjectTools did NOT register here, so the
+  MCP currently CANNOT inspect/edit the scene, author Blueprint graph nodes, or set CineCamera
+  look-at — it is NOT yet a replacement for Python remote-exec. To recover the scene toolsets:
+  console `ModelContextProtocol.RefreshTools` + check Output Log for `toolset_registry` Python
+  import errors (the core Python toolsets likely failed to load or need a plugin enabled).
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
   hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
   `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only
