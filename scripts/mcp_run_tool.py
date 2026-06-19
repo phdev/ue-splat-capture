@@ -14,11 +14,13 @@ TOOLSET = "editor_toolset.toolsets.programmatic.ProgrammaticToolset"
 def main():
     script = open(sys.argv[1]).read()
     sid = mcp_call.session()
-    r = mcp_call.tool_call("call_tool", {
-        "toolset_name": TOOLSET,
-        "tool_name": "execute_tool_script",
-        "arguments": {"script": script},
-    }, sid)
+    raw = mcp_call._curl({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                          "params": {"name": "call_tool", "arguments": {
+                              "toolset_name": TOOLSET,
+                              "tool_name": "execute_tool_script",
+                              "arguments": {"script": script}}}},
+                         sid, timeout=180)
+    r = mcp_call._parse(raw)
     try:
         txt = r["result"]["content"][0]["text"]
     except Exception:

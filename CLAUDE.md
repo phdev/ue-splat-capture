@@ -729,6 +729,24 @@ and the island RE-trained under the exact same recipe with zero regression
   `scripts/mcp_capture.py out.png x y z pitch yaw [gridSpacing gridHeight]` — `CaptureViewport`
   REQUIRES the `annotations` block every call (no default; pass gridSpacing 0 to disable), returns
   a base64 PNG (~3-4MB so use curl timeout ~120s). `mcp_call.py` is import-safe (guarded `main()`).
+- **MCP `set_properties` ARRAY gotcha (cost ~15 min) + the camera re-bake.** The setter models an
+  array edit as "insert into an otherwise-unchanged array": it REFUSES to resize AND change element
+  values in one call (`ArrayAdd: elements changed alongside the size change; insertion points are
+  ambiguous`), and when GROWING it appends only ONE element per call (probed: set 5 from 2 -> 3, not
+  5). Shrinking to an exact smaller size works; same-size sets change values fine. So to REPLACE a
+  whole array: `set {prop: []}` to clear, THEN loop `set {prop: arr[:k+1]}` for k in range(N) — each
+  call appends exactly arr[k] (send growing PREFIXES, not the full array, so the append is
+  deterministic). This is how the BP_PathFly camera path is re-baked: `BP_PathFly_C...InterpMove` is
+  a `UInterpToMovementComponent` whose `controlPoints` are `bPositionIsRelative:True` (relative to
+  the actor's play-start location), `duration` 30s, `Loop_Reset`. Re-path = move the actor onto the
+  ring start with `ActorTools.set_actor_transform` (yaw = travel tangent), then grow `controlPoints`
+  = `[{positionControlPoint: W_i - W_0, bPositionIsRelative:true}]` for i in 0..N (last == first so
+  the loop closes). `scripts/mcp_rebake_cam.tool.py` (verified off_ring=0). FLAT-RING height: the
+  constant z MUST clear the MAX terrain under the ring or it buries on the high side — at r=3000cm
+  the ground spans 1535-2122cm so z=2300 clears it (1.8m min / 7.6m max clearance). `mcp_rail_circle
+  .tool.py` has a `FLAT_Z` constant (None = ground-snap). TIMEOUT: a long `execute_tool_script` (73
+  grow calls) blew the 40s curl cutoff at 61/73 — `mcp_run_tool.py` now uses 180s; probe array
+  semantics with `mcp_probe_array.tool.py`.
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
   hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
   `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only

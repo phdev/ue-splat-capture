@@ -7,7 +7,8 @@ SPLINE = ("/Game/Levels/PCG/ElectricDreams_PCGCloseRange."
 CX, CY = 89712.0, -5226.0   # scene center (cm)
 R = 3000.0                  # radius 30 m
 N = 20                      # points (matches existing mesh segments)
-H = 150.0                   # eye height above ground
+FLAT_Z = 2300.0             # constant ring height (cm); None = ground-snap
+H = 150.0                   # eye height above ground (ground-snap mode only)
 TOP, BOT = 8000.0, -3000.0  # vertical trace span
 
 
@@ -41,7 +42,8 @@ def run():
             last_gz = gz
             hits += 1
         ground_zs.append(gz)
-        pts.append((x, y, gz + H))
+        z = FLAT_Z if FLAT_Z is not None else gz + H
+        pts.append((x, y, z))
 
     points = []
     for i in range(N):
@@ -59,5 +61,7 @@ def run():
 
     ok = set_props({"SplineCurves": {"position": {"points": points}}})
     return {"ok": ok, "n": N, "radius_cm": R, "center": [CX, CY],
-            "ground_hits": hits, "ground_min": min(ground_zs),
-            "ground_max": max(ground_zs)}
+            "flat_z": FLAT_Z, "ground_hits": hits,
+            "ground_min": min(ground_zs), "ground_max": max(ground_zs),
+            "clearance_min": FLAT_Z - max(ground_zs) if FLAT_Z else None,
+            "clearance_max": FLAT_Z - min(ground_zs) if FLAT_Z else None}
