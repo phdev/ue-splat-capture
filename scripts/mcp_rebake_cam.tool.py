@@ -40,17 +40,23 @@ def run():
         return (CX + R * math.cos(a), CY + R * math.sin(a), FLAT_Z)
 
     w0 = w(0)  # start point, +X side of center
-    # face the travel tangent at the start (counter-clockwise => +Y => yaw 90)
+    # Root rotation MUST be identity: InterpToMovement applies its control points
+    # through the actor's root rotation (world_pos = RootRotation . ControlPoint),
+    # so any non-zero root yaw rotates the whole path around the origin. Facing is
+    # handled separately by rotating the CameraComponent in the event graph.
     moved = set_actor_xform(
         {"x": w0[0], "y": w0[1], "z": w0[2]},
-        {"pitch": 0.0, "yaw": 90.0, "roll": 0.0})
+        {"pitch": 0.0, "yaw": 0.0, "roll": 0.0})
 
+    # ABSOLUTE world control points (bPositionIsRelative=false): the camera flies
+    # the exact world ring regardless of where it spawns. Relative points orbit a
+    # shifted center if the play-start location differs from the editor position
+    # (it does in Simulate's streamed/duplicated world).
     cps = []
     for i in range(N + 1):
         wi = w(i)
-        cps.append({"positionControlPoint":
-                    {"x": wi[0] - w0[0], "y": wi[1] - w0[1], "z": wi[2] - w0[2]},
-                    "bPositionIsRelative": True})
+        cps.append({"positionControlPoint": {"x": wi[0], "y": wi[1], "z": wi[2]},
+                    "bPositionIsRelative": False})
 
     # The setter only appends ONE element per call when growing, so clear to
     # empty then send growing prefixes — each call appends exactly one point.
@@ -59,11 +65,11 @@ def run():
         set_props(IM, {"controlPoints": cps[:k + 1]})
     final = cp_count()
 
-    # verify world positions land on the flat ring
+    # verify world positions land on the flat ring (points are absolute world)
     bad = 0
     for i, c in enumerate(cps):
         p = c["positionControlPoint"]
-        wx, wy, wz = w0[0] + p["x"], w0[1] + p["y"], w0[2] + p["z"]
+        wx, wy, wz = p["x"], p["y"], p["z"]
         if abs(math.hypot(wx - CX, wy - CY) - R) > 1.0 or abs(wz - FLAT_Z) > 1.0:
             bad += 1
     return {"moved": moved, "n_set": final, "n_expected": len(cps),

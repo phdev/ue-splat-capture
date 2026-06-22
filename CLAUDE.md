@@ -747,6 +747,36 @@ and the island RE-trained under the exact same recipe with zero regression
   .tool.py` has a `FLAT_Z` constant (None = ground-snap). TIMEOUT: a long `execute_tool_script` (73
   grow calls) blew the 40s curl cutoff at 61/73 — `mcp_run_tool.py` now uses 180s; probe array
   semantics with `mcp_probe_array.tool.py`.
+- **FORWARD-FACING FLYTHROUGH CAMERA — solved (2026-06-22), 3 stacked gotchas.** Goal: BP_PathFly
+  camera faces its travel direction. (1) `GetVelocity` on the InterpToMovement returns ZERO (it
+  moves by SetWorldLocation, never sets velocity) — so face the POSITION DELTA instead:
+  `MakeRotFromX(GetActorLocation - LastLocation)` with a `LastLocation` Vector member var seeded in
+  BeginPlay. (2) **InterpToMovementComponent applies its control points THROUGH the actor's ROOT
+  rotation** (empirically `world_pos = RootRotation . ControlPoint`): so `SetActorRotation` on the
+  root to face travel FEEDS BACK into the mover — a changing root yaw makes the path spiral/runaway
+  (with absolute points it orbits the world ORIGIN at radius=|center|). TWO consequences: the
+  re-bake MUST leave the actor root at yaw 0 / identity (any constant root yaw rotates the whole
+  path around the origin by that yaw — yaw 90 put the ring at the center rotated 90deg), AND facing
+  must rotate the CAMERA COMPONENT, not the actor. FIX: `SetWorldRotation` on
+  `Variables|CameraActor|GetCameraComponent` (the child view) — the root stays put so the mover is
+  clean and the camera still faces travel. (3) The camera's optical forward needed the delta
+  NEGATED (`LastLocation - cur`) to point forward instead of ~backward. Final graph =
+  `scripts/bp_pathfly_facing.dsl`. VERIFIED in Simulate: path center exactly (89712,-5226) r2998
+  resid 0cm, camera yaw tracks travel (pitch/roll 0, level). DSL gotcha: actor-method nodes
+  (GetActorLocation / SetActorRotation / SetWorldRotation) have a REAL `self` pin — pass `:self
+  self` (or the camera component) or a positional arg mis-wires onto `self` ("Could not connect pin
+  ReturnValue to self"); read_graph_dsl output is NOT directly writable (its implicit self differs).
+- **SIMULATE/PIE INTROSPECTION via MCP (gotchas).** To watch an actor move at runtime: `StartPIE`
+  with `{bSimulate:true, playMode:"PlayMode_Simulate", warmupSeconds:1.5}` (Simulate ticks the world,
+  no pawn). The editor actor is FROZEN (Simulate runs a duplicated world); find the live copy by
+  CLASS (`find_actors actor_type=/Game/CapturePath/BP_PathFly.BP_PathFly_C`) in the `UEDPIE_0_...`
+  level — a NAME search misses it. World-Partition gotcha: the actor's cell only streams into the
+  sim world if a streaming source is near it — park the editor viewport cam at the ring first
+  (`SetCameraTransform`) or `find_actors` returns []. Sample transforms via DISCRETE bash mcp_call
+  commands with `sleep` between (a tight back-to-back python loop trips the SSE empty-read and
+  hangs); the game thread ticks PIE between calls. ALWAYS `StopPIE` when done (a wedged run leaves
+  PIE up — check `IsPIERunning`). Helpers: `mcp_pie_fit.py` (circle-fit the path),
+  `mcp_pie_verify.py`, `mcp_write_graph.py` (write a Blueprint graph from a .dsl file).
 - **PIE PREVIEW of the rail (`scripts/path_rail_preview.py`).** "Fly the capture path when I
   hit Play." CRITICAL: attaching a camera to CAPTURE_PATH_RAIL + animating
   `CurrentPositionOnRail` in a sequence does NOT move the camera in PIE — the rail only
