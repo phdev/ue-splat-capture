@@ -5,5 +5,5 @@
   (bind cur (Transformation|GetActorLocation :self self))
   (Transformation|SetWorldRotation
     :self (Variables|CameraActor|GetCameraComponent)
-    :NewRotation (Math|Rotator|MakeRotFromX :X (- (Variables|Default|GetLastLocation) cur)))
+    :NewRotation (Math|Rotator|MakeRotFromX :X (- cur (Variables|Default|GetLastLocation))))
   (Variables|Default|SetLastLocation cur))

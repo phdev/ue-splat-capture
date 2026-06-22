@@ -759,10 +759,16 @@ and the island RE-trained under the exact same recipe with zero regression
   path around the origin by that yaw — yaw 90 put the ring at the center rotated 90deg), AND facing
   must rotate the CAMERA COMPONENT, not the actor. FIX: `SetWorldRotation` on
   `Variables|CameraActor|GetCameraComponent` (the child view) — the root stays put so the mover is
-  clean and the camera still faces travel. (3) The camera's optical forward needed the delta
-  NEGATED (`LastLocation - cur`) to point forward instead of ~backward. Final graph =
-  `scripts/bp_pathfly_facing.dsl`. VERIFIED in Simulate: path center exactly (89712,-5226) r2998
-  resid 0cm, camera yaw tracks travel (pitch/roll 0, level). DSL gotcha: actor-method nodes
+  clean and the camera still faces travel. (3) The camera view axis is +X, so facing travel =
+  `MakeRotFromX(cur - LastLocation)` (the plain velocity, NOT negated — an earlier negate based on
+  throttled-Simulate measurements was WRONG; the user's "90deg to the left of the track" rest-pose
+  observation revealed the +X view and corrected it). Final graph = `scripts/bp_pathfly_facing.dsl`.
+  ALSO set the camera component's design `RelativeRotation` to the start tangent (yaw 90) so the
+  camera faces the track AT REST too (the graph only runs during play; a stopped camera otherwise
+  sits at its placed yaw 0 = radially outward = 90deg off the track). MEASUREMENT WARNING: a
+  backgrounded Simulate is App-Nap-throttled to a few fps, so the per-tick position delta spans a
+  big arc and the measured facing-vs-tangent picks up a bogus ~18deg lead — do NOT trust small
+  facing offsets from throttled Simulate; verify forward/back from geometry or the user's eyes. DSL gotcha: actor-method nodes
   (GetActorLocation / SetActorRotation / SetWorldRotation) have a REAL `self` pin — pass `:self
   self` (or the camera component) or a positional arg mis-wires onto `self` ("Could not connect pin
   ReturnValue to self"); read_graph_dsl output is NOT directly writable (its implicit self differs).
